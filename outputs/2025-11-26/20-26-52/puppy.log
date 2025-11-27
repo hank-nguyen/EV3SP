@@ -1,0 +1,4 @@
+[2025-11-26 20:26:53,526][paramiko.transport][INFO] - Connected (version 2.0, client OpenSSH_7.4p1)
+[2025-11-26 20:26:54,463][paramiko.transport][INFO] - Authentication (publickey) successful!
+[2025-11-26 20:26:55,424][paramiko.transport.sftp][INFO] - [chan 0] Opened sftp connection (server version 3)
+[2025-11-26 20:35:06,862][paramiko.transport.sftp][INFO] - [chan 0] sftp session closed.

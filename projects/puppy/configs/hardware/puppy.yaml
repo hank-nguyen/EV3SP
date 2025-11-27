@@ -1,0 +1,23 @@
+# Puppy robot hardware configuration
+robot: puppy
+
+motors:
+  left_leg:
+    port: D
+    direction: counterclockwise
+  right_leg:
+    port: A
+    direction: counterclockwise
+  head:
+    port: C
+    direction: counterclockwise
+    gears: [[1, 24], [12, 36]]
+
+sensors:
+  touch:
+    port: S1
+    type: touch
+  color:
+    port: S4
+    type: color
+

@@ -1,0 +1,3 @@
+# Local EV3 connection (running directly on brick)
+mode: local
+

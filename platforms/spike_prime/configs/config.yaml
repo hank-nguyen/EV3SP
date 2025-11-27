@@ -1,0 +1,6 @@
+defaults:
+  - connection: bluetooth
+
+# Spike Prime settings
+platform: spike_prime
+

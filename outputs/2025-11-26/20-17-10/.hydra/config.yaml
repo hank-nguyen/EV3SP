@@ -1,0 +1,53 @@
+connection:
+  mode: remote
+  host: ev3dev.local
+  user: robot
+  password: maker
+  port: 22
+  work_dir: /home/robot/ev3
+hardware:
+  robot: puppy
+  motors:
+    left_leg:
+      port: D
+      direction: counterclockwise
+    right_leg:
+      port: A
+      direction: counterclockwise
+    head:
+      port: C
+      direction: counterclockwise
+      gears:
+      - - 1
+        - 24
+      - - 12
+        - 36
+  sensors:
+    touch:
+      port: S1
+      type: touch
+    color:
+      port: S4
+      type: color
+action: head_down
+behavior:
+  idle_timeout_ms: 30000
+  pet_decay_ms: 15000
+  feed_decay_ms: 15000
+  pet_target_min: 3
+  pet_target_max: 6
+  feed_target_min: 2
+  feed_target_max: 4
+motion:
+  leg_speed: 100
+  head_speed: 20
+  half_up_angle: 25
+  stand_up_angle: 65
+  stretch_angle: 125
+  head_up_angle: 0
+  head_down_angle: -40
+streaming:
+  enabled: false
+  interval_ms: 100
+  host: 0.0.0.0
+  port: 9999
