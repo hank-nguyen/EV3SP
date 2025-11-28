@@ -2,6 +2,17 @@
 
 The `core/` module provides abstract interfaces and utilities that work across all robot platforms (EV3, Spike Prime, and future additions).
 
+## Quick Start (EV3 MicroPython - Recommended)
+
+```python
+from platforms.ev3 import EV3MicroPython
+
+async with EV3MicroPython() as ev3:
+    await ev3.beep(880, 200)  # ~2-5ms via USB!
+```
+
+See `platforms/ev3/README.md` for setup instructions.
+
 ## Architecture
 
 ```
@@ -196,14 +207,14 @@ Ensures:
 
 ## Platform Comparison
 
-| Feature | EV3 | Spike Prime |
-|---------|-----|-------------|
-| **Connection** | SSH (Paramiko) | BLE (Bleak) |
-| **Latency** | ~20-50ms (daemon) | ~50-300ms |
-| **Daemon** | ✅ Yes (stdin/stdout) | ❌ No (no stdin) |
-| **Streaming** | ✅ Real-time commands | ❌ Upload per action |
-| **Startup Sound** | None | Melody per program |
-| **Signals** | stdout | ConsoleNotification |
+| Feature | EV3 (MicroPython) | EV3 (ev3dev) | Spike Prime |
+|---------|-------------------|--------------|-------------|
+| **Connection** | USB/WiFi TCP | SSH (Paramiko) | BLE (Bleak) |
+| **Latency** | **~1-15ms** ⚡ | ~30-50ms | ~50-300ms |
+| **Daemon** | ✅ Yes | ✅ Yes | ❌ No (no stdin) |
+| **Streaming** | ✅ Real-time | ✅ Real-time | ❌ Upload per action |
+| **Startup Sound** | None | None | Melody per program |
+| **Signals** | stdout | stdout | ConsoleNotification |
 
 ## Key Insights
 

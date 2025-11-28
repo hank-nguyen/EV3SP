@@ -1,0 +1,21 @@
+# Collaborate Test Main Configuration
+
+defaults:
+  - devices
+
+# Project mapping: which project runs on which device
+# Use "collaborate_test" for the built-in minimal daemon
+projects:
+  ev3: collaborate_test  # EV3 runs collaborate_test's minimal daemon
+  spike: null            # Spike uses built-in fast actions
+
+# Timing settings
+timing:
+  action_delay_ms: 300
+  connect_timeout: 10
+
+# Latency mode
+# - "ack": Wait for acknowledgment (reliable, default)
+# - "fire": Fire-and-forget (faster but no confirmation)
+latency_mode: ack
+

@@ -1,0 +1,122 @@
+# Puppy Robot Actions
+# Translated to generic daemon commands by ActionAdapter
+#
+# Motor ports: A=right leg, C=head, D=left leg
+# Sensors: S1=touch, S4=color
+
+actions:
+  sitdown:
+    description: "Sit down"
+    steps:
+      - [eyes happy, 0]
+      - [motor D 120 1500, 0]
+      - [motor A 120 1500, 500]
+      - [stop, 0]
+
+  standup:
+    description: "Stand up"
+    steps:
+      - [eyes neutral, 0]
+      - [motor D -90 500, 0]
+      - [motor A -90 500, 200]
+      - [motor D -70 450, 0]
+      - [motor A -70 450, 200]
+      - [stop, 0]
+
+  bark:
+    description: "Bark (woof woof)"
+    steps:
+      - [eyes surprised, 0]
+      - [sound dog_bark, 0]
+
+  stretch:
+    description: "Stretch legs"
+    steps:
+      - [eyes sleepy, 0]
+      - [motor D 80 500, 0]
+      - [motor A 80 500, 300]
+      - [motor D 60 600, 0]
+      - [motor A 60 600, 300]
+      - [motor D 80 800, 0]
+      - [motor A 80 800, 300]
+      - [motor D -80 800, 0]
+      - [motor A -80 800, 300]
+      - [eyes neutral, 0]
+
+  hop:
+    description: "Jump"
+    steps:
+      - [eyes surprised, 0]
+      - [motor D 150, 0]
+      - [motor A 150, 300]
+      - [stop, 200]
+      - [motor D -80, 0]
+      - [motor A -80, 300]
+      - [stop, 0]
+
+  head_up:
+    description: "Raise head"
+    steps:
+      - [eyes neutral, 0]
+      - [motor C 50 600, 0]
+
+  head_down:
+    description: "Lower head"
+    steps:
+      - [eyes sleepy, 0]
+      - [motor C -50 600, 0]
+
+  happy:
+    description: "Happy expression with dance"
+    steps:
+      - [eyes happy, 0]
+      - [sound dog_bark, 0]
+      - [motor D 120, 0]
+      - [motor A 120, 300]
+      - [stop, 200]
+      - [motor D -60, 0]
+      - [motor A -60, 300]
+      - [stop, 0]
+      - [sound dog_bark, 0]
+
+  angry:
+    description: "Angry expression with growl"
+    steps:
+      - [eyes angry, 0]
+      - [sound dog_growl, 0]
+      - [motor D 80 500, 0]
+      - [motor A 80 500, 300]
+      - [motor D 60 600, 0]
+      - [motor A 60 600, 0]
+      - [sound dog_bark, 0]
+
+  sleep:
+    description: "Go to sleep"
+    steps:
+      - [eyes sleepy, 0]
+      - [motor D -60, 0]
+      - [motor A -60, 1500]
+      - [stop, 0]
+      - [display Zzz..., 0]
+
+  wakeup:
+    description: "Wake up"
+    steps:
+      - [eyes surprised, 0]
+      - [beep 880 200, 0]
+      - [motor D 120 500, 0]
+      - [motor A 120 500, 300]
+      - [eyes neutral, 0]
+
+  playful:
+    description: "Playful mood"
+    steps:
+      - [eyes happy, 0]
+      - [motor D 100 300, 0]
+      - [motor A 100 300, 150]
+      - [motor D -100 300, 0]
+      - [motor A -100 300, 150]
+      - [motor D 100 300, 0]
+      - [motor A 100 300, 150]
+      - [sound dog_bark, 0]
+

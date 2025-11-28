@@ -3,10 +3,13 @@
 EV3 Puppy Robot Controller
 --------------------------
 Flexible controller with CLI actions and Hydra configuration.
-Compatible with both local EV3 execution and remote control via ev3_interface.
+Compatible with both local EV3 execution and remote control.
+
+Default: MicroPython interface (USB/WiFi TCP) with ~1-15ms latency.
+Legacy: SSH interface available with transport="ssh".
 
 Usage:
-    python puppy.py action=standup                    # Stand up (remote by default)
+    python puppy.py action=standup                    # Stand up (MicroPython)
     python puppy.py action=sitdown                    # Sit down
     python puppy.py action=bark                       # Bark
     python puppy.py action=stretch                    # Stretch
@@ -15,8 +18,13 @@ Usage:
     python puppy.py action=wakeup                     # Wake up
     python puppy.py action=stream                     # Stream sensor data
     python puppy.py connection=local action=run       # Run on EV3 directly
+
+Prerequisites:
+    - EV3 running Pybricks MicroPython with pybricks_daemon.py
+    - Or EV3 running ev3dev with puppy_daemon.py (legacy SSH mode)
 """
 
+import asyncio
 import json
 import os
 import random
@@ -53,6 +61,13 @@ except ImportError:
     DictConfig = dict
 
 # Import from platforms (host-side only)
+try:
+    from platforms.ev3.ev3_micropython import EV3MicroPython, EV3Config
+    EV3_MICROPYTHON_AVAILABLE = True
+except ImportError:
+    EV3_MICROPYTHON_AVAILABLE = False
+
+# Legacy SSH interface (fallback)
 try:
     from platforms.ev3.ev3_interface import EV3Interface, EV3DaemonSession
     EV3_INTERFACE_AVAILABLE = True
@@ -712,353 +727,58 @@ class Puppy:
 
 
 # -----------------------------------------------------------------------------
-# Remote Puppy Controller (sends commands to EV3 via SSH)
+# Action Adapter (loaded from platform level)
+# -----------------------------------------------------------------------------
+# Actions are now defined in configs/actions.yaml and loaded via ActionAdapter
+# from platforms/ev3/action_adapter.py - keeping project code clean!
+
+# Lazy-loaded action adapter with auto-reload on file change
+_action_adapter = None
+_action_yaml_mtime = 0
+
+def get_action_adapter(force_reload=False):
+    """Get or create the action adapter (auto-reloads if YAML file changed)."""
+    global _action_adapter, _action_yaml_mtime
+    
+    try:
+        from platforms.ev3.action_adapter import ActionAdapter
+        import os
+        yaml_path = os.path.join(os.path.dirname(__file__), "configs", "actions.yaml")
+        
+        if os.path.exists(yaml_path):
+            current_mtime = os.path.getmtime(yaml_path)
+            
+            # Reload if: forced, first load, or file modified
+            if force_reload or _action_adapter is None or current_mtime > _action_yaml_mtime:
+                _action_adapter = ActionAdapter.from_yaml(yaml_path)
+                _action_yaml_mtime = current_mtime
+        elif _action_adapter is None:
+            # Fallback to built-in
+            from platforms.ev3.action_adapter import PUPPY_ACTIONS
+            _action_adapter = ActionAdapter(PUPPY_ACTIONS)
+    except ImportError:
+        _action_adapter = None
+    
+    return _action_adapter
+
+
+# -----------------------------------------------------------------------------
+# Remote Puppy Controller (sends commands to EV3 via MicroPython)
 # -----------------------------------------------------------------------------
 
 class RemotePuppy:
-    """Control EV3 Puppy remotely via SSH."""
+    """
+    Control EV3 Puppy remotely via MicroPython interface.
+    
+    Default: Uses EV3MicroPython (USB/WiFi TCP) with ~1-15ms latency.
+    Fallback: Legacy SSH interface if MicroPython not available.
+    
+    The daemon (pybricks_daemon.py or puppy_daemon.py) must be running on EV3.
+    """
     
     # Daemon file to upload (in same directory as this script)
     DAEMON_PUPPY_FILE = "puppy_daemon.py"
     
-    # Legacy embedded script (fallback if files not found)
-    EV3_DAEMON_SCRIPT = '''#!/usr/bin/env python3
-import sys
-import time
-import json
-
-# ev3dev2 imports - done ONCE at startup
-from ev3dev2.motor import LargeMotor, MediumMotor, OUTPUT_A, OUTPUT_C, OUTPUT_D
-from ev3dev2.sensor.lego import TouchSensor, ColorSensor
-from ev3dev2.sensor import INPUT_1, INPUT_4
-from ev3dev2.sound import Sound
-from ev3dev2.display import Display
-
-# Initialize ONCE
-sound = Sound()
-lcd = Display()
-left_motor = None
-right_motor = None
-head_motor = None
-touch_sensor = None
-color_sensor = None
-
-# Eye styles using PIL for drawing (compatible with older PIL)
-from PIL import Image, ImageDraw
-
-def draw_eyes(style="neutral"):
-    # Create image buffer (178x128 is EV3 screen size)
-    img = Image.new("1", (178, 128), color=0)  # 1-bit, black background
-    draw = ImageDraw.Draw(img)
-    
-    cx1, cx2 = 45, 133  # eye centers
-    cy = 64
-    
-    if style == "neutral":
-        # Round open eyes - white circles with black pupils
-        draw.ellipse([cx1-25, cy-25, cx1+25, cy+25], fill=1)
-        draw.ellipse([cx2-25, cy-25, cx2+25, cy+25], fill=1)
-        draw.ellipse([cx1-10, cy-10, cx1+10, cy+10], fill=0)
-        draw.ellipse([cx2-10, cy-10, cx2+10, cy+10], fill=0)
-    
-    elif style == "happy":
-        # Happy curved eyes (^_^)
-        draw.ellipse([cx1-25, cy-25, cx1+25, cy+25], fill=1)
-        draw.ellipse([cx2-25, cy-25, cx2+25, cy+25], fill=1)
-        # Arc smiles using ellipse outline
-        draw.arc([cx1-15, cy-15, cx1+15, cy+15], 0, 180, fill=0)
-        draw.arc([cx2-15, cy-15, cx2+15, cy+15], 0, 180, fill=0)
-        draw.arc([cx1-14, cy-14, cx1+14, cy+14], 0, 180, fill=0)
-        draw.arc([cx2-14, cy-14, cx2+14, cy+14], 0, 180, fill=0)
-    
-    elif style == "angry":
-        # Angry slanted eyes
-        draw.ellipse([cx1-25, cy-25, cx1+25, cy+25], fill=1)
-        draw.ellipse([cx2-25, cy-25, cx2+25, cy+25], fill=1)
-        draw.ellipse([cx1-8, cy-3, cx1+12, cy+17], fill=0)
-        draw.ellipse([cx2-12, cy-3, cx2+8, cy+17], fill=0)
-        # Angry eyebrows using polygons
-        draw.polygon([(cx1-20, cy-30), (cx1+15, cy-20), (cx1+15, cy-16), (cx1-20, cy-26)], fill=0)
-        draw.polygon([(cx2+20, cy-30), (cx2-15, cy-20), (cx2-15, cy-16), (cx2+20, cy-26)], fill=0)
-    
-    elif style == "sleepy":
-        # Half-closed eyes
-        draw.ellipse([cx1-25, cy-25, cx1+25, cy+25], fill=1)
-        draw.ellipse([cx2-25, cy-25, cx2+25, cy+25], fill=1)
-        # Eyelids
-        draw.rectangle([cx1-26, cy-26, cx1+26, cy-5], fill=0)
-        draw.rectangle([cx2-26, cy-26, cx2+26, cy-5], fill=0)
-        draw.ellipse([cx1-6, cy, cx1+6, cy+12], fill=0)
-        draw.ellipse([cx2-6, cy, cx2+6, cy+12], fill=0)
-    
-    elif style == "surprised":
-        # Big wide eyes
-        draw.ellipse([cx1-30, cy-30, cx1+30, cy+30], fill=1)
-        draw.ellipse([cx2-30, cy-30, cx2+30, cy+30], fill=1)
-        draw.ellipse([cx1-15, cy-15, cx1+15, cy+15], fill=0)
-        draw.ellipse([cx2-15, cy-15, cx2+15, cy+15], fill=0)
-        # Highlights
-        draw.ellipse([cx1-12, cy-12, cx1-4, cy-4], fill=1)
-        draw.ellipse([cx2-12, cy-12, cx2-4, cy-4], fill=1)
-    
-    elif style == "love":
-        # Heart eyes
-        draw.ellipse([cx1-25, cy-25, cx1+25, cy+25], fill=1)
-        draw.ellipse([cx2-25, cy-25, cx2+25, cy+25], fill=1)
-        # Hearts made of overlapping circles + triangle
-        draw.ellipse([cx1-12, cy-10, cx1, cy+2], fill=0)
-        draw.ellipse([cx1, cy-10, cx1+12, cy+2], fill=0)
-        draw.polygon([(cx1-10, cy-2), (cx1, cy+12), (cx1+10, cy-2)], fill=0)
-        draw.ellipse([cx2-12, cy-10, cx2, cy+2], fill=0)
-        draw.ellipse([cx2, cy-10, cx2+12, cy+2], fill=0)
-        draw.polygon([(cx2-10, cy-2), (cx2, cy+12), (cx2+10, cy-2)], fill=0)
-    
-    elif style == "wink":
-        # One eye open, one closed
-        draw.ellipse([cx1-25, cy-25, cx1+25, cy+25], fill=1)
-        draw.ellipse([cx2-25, cy-25, cx2+25, cy+25], fill=1)
-        draw.ellipse([cx1-10, cy-10, cx1+10, cy+10], fill=0)
-        # Wink - horizontal line using rectangle
-        draw.rectangle([cx2-18, cy-2, cx2+18, cy+2], fill=0)
-    
-    elif style == "off":
-        pass  # already black
-    
-    else:  # default neutral
-        draw.ellipse([cx1-25, cy-25, cx1+25, cy+25], fill=1)
-        draw.ellipse([cx2-25, cy-25, cx2+25, cy+25], fill=1)
-        draw.ellipse([cx1-10, cy-10, cx1+10, cy+10], fill=0)
-        draw.ellipse([cx2-10, cy-10, cx2+10, cy+10], fill=0)
-    
-    lcd.image.paste(img, (0, 0))
-    lcd.update()
-
-def init_hardware():
-    global left_motor, right_motor, head_motor, touch_sensor, color_sensor
-    try:
-        left_motor = LargeMotor(OUTPUT_D)
-    except:
-        pass
-    try:
-        right_motor = LargeMotor(OUTPUT_A)
-    except:
-        pass
-    try:
-        head_motor = MediumMotor(OUTPUT_C)
-    except:
-        pass
-    try:
-        touch_sensor = TouchSensor(INPUT_1)
-    except:
-        pass
-    try:
-        color_sensor = ColorSensor(INPUT_4)
-    except:
-        pass
-
-def standup():
-    if not left_motor or not right_motor:
-        return "ERROR: motors"
-    draw_eyes("neutral")
-    left_motor.on_for_degrees(speed=30, degrees=25, block=False)
-    right_motor.on_for_degrees(speed=30, degrees=25, block=True)
-    time.sleep(0.3)
-    left_motor.on_for_degrees(speed=25, degrees=40, block=False)
-    right_motor.on_for_degrees(speed=25, degrees=40, block=True)
-    return "OK"
-
-def sitdown():
-    if not left_motor or not right_motor:
-        return "ERROR: motors"
-    draw_eyes("sleepy")
-    left_motor.on(speed=-25)
-    right_motor.on(speed=-25)
-    time.sleep(0.8)
-    left_motor.off()
-    right_motor.off()
-    return "OK"
-
-def bark():
-    draw_eyes("surprised")
-    sound.speak("woof woof")
-    # Keep surprised eyes - don't reset
-    return "OK"
-
-def stretch():
-    if not left_motor or not right_motor:
-        return "ERROR: motors"
-    draw_eyes("sleepy")
-    left_motor.on_for_degrees(speed=30, degrees=25, block=False)
-    right_motor.on_for_degrees(speed=30, degrees=25, block=True)
-    time.sleep(0.3)
-    left_motor.on_for_degrees(speed=25, degrees=40, block=False)
-    right_motor.on_for_degrees(speed=25, degrees=40, block=True)
-    left_motor.on_for_degrees(speed=30, degrees=60, block=False)
-    right_motor.on_for_degrees(speed=30, degrees=60, block=True)
-    left_motor.on_for_degrees(speed=30, degrees=-60, block=False)
-    right_motor.on_for_degrees(speed=30, degrees=-60, block=True)
-    draw_eyes("neutral")
-    return "OK"
-
-def hop():
-    if not left_motor or not right_motor:
-        return "ERROR: motors"
-    draw_eyes("surprised")
-    left_motor.on(speed=50)
-    right_motor.on(speed=50)
-    time.sleep(0.2)
-    left_motor.off(brake=True)
-    right_motor.off(brake=True)
-    time.sleep(0.2)
-    left_motor.on(speed=-25)
-    right_motor.on(speed=-25)
-    time.sleep(0.2)
-    left_motor.off()
-    right_motor.off()
-    # Keep surprised eyes - don't reset
-    return "OK"
-
-def head_up():
-    draw_eyes("neutral")
-    if head_motor:
-        head_motor.on_for_degrees(speed=15, degrees=40)
-        return "OK"
-    return "ERROR: head"
-
-def head_down():
-    draw_eyes("sleepy")
-    if head_motor:
-        head_motor.on_for_degrees(speed=15, degrees=-40)
-        return "OK"
-    return "ERROR: head"
-
-def happy():
-    draw_eyes("love")
-    sound.speak("woof")
-    if left_motor and right_motor:
-        left_motor.on(speed=50)
-        right_motor.on(speed=50)
-        time.sleep(0.2)
-        left_motor.off(brake=True)
-        right_motor.off(brake=True)
-        time.sleep(0.2)
-        left_motor.on(speed=-25)
-        right_motor.on(speed=-25)
-        time.sleep(0.2)
-        left_motor.off()
-        right_motor.off()
-    draw_eyes("happy")
-    sound.speak("woof")
-    # Keep happy eyes
-    return "OK"
-
-def angry():
-    draw_eyes("angry")
-    sound.speak("grrr")
-    if left_motor and right_motor:
-        left_motor.on_for_degrees(speed=30, degrees=25, block=False)
-        right_motor.on_for_degrees(speed=30, degrees=25, block=True)
-        time.sleep(0.3)
-        left_motor.on_for_degrees(speed=25, degrees=40, block=False)
-        right_motor.on_for_degrees(speed=25, degrees=40, block=True)
-    sound.speak("woof woof")
-    # Keep angry eyes
-    return "OK"
-
-def status():
-    r = {"m": {}, "s": {}}
-    if left_motor:
-        r["m"]["l"] = left_motor.position
-    if right_motor:
-        r["m"]["r"] = right_motor.position
-    if head_motor:
-        r["m"]["h"] = head_motor.position
-    if touch_sensor:
-        r["s"]["t"] = touch_sensor.is_pressed
-    if color_sensor:
-        r["s"]["c"] = color_sensor.color_name
-    return json.dumps(r)
-
-def stop():
-    if left_motor:
-        left_motor.off()
-    if right_motor:
-        right_motor.off()
-    if head_motor:
-        head_motor.off()
-    return "OK"
-
-ACTIONS = {
-    "standup": standup, "sitdown": sitdown, "bark": bark,
-    "stretch": stretch, "hop": hop, "head_up": head_up,
-    "head_down": head_down, "happy": happy, "angry": angry,
-    "status": status, "stop": stop,
-}
-
-# Eye styles that can be called directly
-EYE_STYLES = ["neutral", "happy", "angry", "sleepy", "surprised", "love", "wink", "off"]
-
-def stop_brickman():
-    import subprocess
-    try:
-        subprocess.call("echo maker | sudo -S systemctl stop brickman 2>/dev/null", shell=True)
-        time.sleep(0.5)
-    except:
-        pass
-
-def start_brickman():
-    import subprocess
-    try:
-        subprocess.call("echo maker | sudo -S systemctl start brickman 2>/dev/null", shell=True)
-    except:
-        pass
-
-if __name__ == "__main__":
-    # Stop brickman to take full control of screen
-    stop_brickman()
-    
-    init_hardware()
-    draw_eyes("neutral")
-    sys.stdout.write("READY\\n")
-    sys.stdout.flush()
-    
-    while True:
-        try:
-            line = sys.stdin.readline()
-            if not line:
-                break
-            cmd = line.strip().lower()
-            if cmd == "quit" or cmd == "exit":
-                draw_eyes("sleepy")
-                break
-            
-            # Handle eyes command with style parameter
-            if cmd.startswith("eyes"):
-                parts = cmd.split()
-                style = parts[1] if len(parts) > 1 else "neutral"
-                if style in EYE_STYLES:
-                    draw_eyes(style)
-                    sys.stdout.write("OK: eyes " + style + "\\n")
-                else:
-                    sys.stdout.write("OK: styles=" + ",".join(EYE_STYLES) + "\\n")
-                sys.stdout.flush()
-                continue
-            
-            if cmd in ACTIONS:
-                result = ACTIONS[cmd]()
-                sys.stdout.write(str(result) + "\\n")
-            else:
-                sys.stdout.write("ERR: " + cmd + "\\n")
-            sys.stdout.flush()
-        except Exception as e:
-            sys.stdout.write("ERR: " + str(e) + "\\n")
-            sys.stdout.flush()
-    
-    stop()
-    # Restart brickman when done
-    start_brickman()
-'''
-
     COMMANDS_HELP = """
 Commands: standup, sitdown, bark, stretch, hop
           head_up, head_down, happy, angry, status, stop
@@ -1068,119 +788,213 @@ Commands: standup, sitdown, bark, stretch, hop
           quit/exit/q - disconnect"""
 
     def __init__(self, host: str = "ev3dev.local", user: str = "robot", 
-                 password: str = "maker", sudo_password: str = "maker"):
+                 password: str = "maker", sudo_password: str = "maker",
+                 transport: str = "micropython"):
+        """
+        Initialize RemotePuppy controller.
+        
+        Args:
+            host: EV3 hostname or IP
+            user: SSH username (only for legacy mode)
+            password: SSH password (only for legacy mode)
+            sudo_password: sudo password (only for legacy mode)
+            transport: "micropython" (default, fast) or "ssh" (legacy)
+        """
         self.host = host
         self.user = user
         self.password = password
         self.sudo_password = sudo_password
-        self._ev3: Optional[EV3Interface] = None
+        self.transport = transport
+        self._ev3 = None
+        self._connected = False
+        self._loop = None
+        self._script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Legacy SSH fields (only used if transport="ssh")
         self._channel = None
         self._stdin = None
         self._stdout = None
         self._daemon_running = False
-        self._script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    def _get_loop(self):
+        """Get or create event loop for async operations."""
+        if self._loop is None or self._loop.is_closed():
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self._loop)
+        return self._loop
+
+    def _run_async(self, coro):
+        """Run async coroutine synchronously."""
+        loop = self._get_loop()
+        return loop.run_until_complete(coro)
 
     def _connect(self):
-        """Connect to EV3 if not already connected."""
-        if self._ev3 is None:
-            if not EV3_INTERFACE_AVAILABLE:
-                raise RuntimeError("ev3_interface not available")
-            self._ev3 = EV3Interface(self.host, self.user, self.password)
-            self._ev3.connect()
+        """Connect to EV3 using MicroPython or legacy SSH."""
+        if self._connected:
+            return
+        
+        if self.transport == "micropython":
+            self._connect_micropython()
+        else:
+            self._connect_ssh()
+
+    def _connect_micropython(self):
+        """Connect using MicroPython interface (fast!)."""
+        if not EV3_MICROPYTHON_AVAILABLE:
+            raise RuntimeError("EV3MicroPython not available. Install pyserial.")
+        
+        config = EV3Config(wifi_host=self.host, wifi_port=9000)
+        self._ev3 = EV3MicroPython(config=config)
+        
+        connected = self._run_async(self._ev3.connect())
+        if not connected:
+            raise RuntimeError(f"Failed to connect to EV3 at {self.host}")
+        
+        self._connected = True
+        print(f"✓ EV3 MicroPython connected ({self._ev3.transport_name})")
+
+    def _connect_ssh(self):
+        """Connect using legacy SSH interface."""
+        if not EV3_INTERFACE_AVAILABLE:
+            raise RuntimeError("EV3Interface (SSH) not available. Install paramiko.")
+        
+        self._ev3 = EV3Interface(self.host, self.user, self.password)
+        self._ev3.connect()
+        self._connected = True
 
     def _upload_daemon(self):
-        """Upload daemon script to EV3."""
-        self._connect()
+        """Upload daemon script to EV3 (SSH only)."""
+        if self.transport == "micropython":
+            return  # MicroPython doesn't need daemon upload
+        
         import tempfile
         
-        # Try external puppy_daemon.py file first
+        # Load from puppy_daemon.py file
         puppy_file = os.path.join(self._script_dir, self.DAEMON_PUPPY_FILE)
         
-        if os.path.exists(puppy_file):
-            # Read and inject sudo password
-            with open(puppy_file, 'r') as f:
-                content = f.read()
-            content = content.replace(
-                'SUDO_PASSWORD = "maker"',
-                'SUDO_PASSWORD = "' + self.sudo_password + '"'
-            )
-            
-            # Upload with injected password
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                f.write(content)
-                temp_path = f.name
-            self._ev3.upload_file(temp_path, "puppy_daemon.py")
-            os.unlink(temp_path)
-        else:
-            # Fallback to embedded script
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                f.write(self.EV3_DAEMON_SCRIPT)
-                temp_path = f.name
-            self._ev3.upload_file(temp_path, "puppy_daemon.py")
-            os.unlink(temp_path)
+        if not os.path.exists(puppy_file):
+            raise FileNotFoundError(f"Daemon file not found: {puppy_file}")
+        
+        with open(puppy_file, 'r') as f:
+            content = f.read()
+        
+        # Substitute sudo password
+        content = content.replace(
+            'SUDO_PASSWORD = "maker"',
+            f'SUDO_PASSWORD = "{self.sudo_password}"'
+        )
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(content)
+            temp_path = f.name
+        
+        self._ev3.upload_file(temp_path, "puppy_daemon.py")
+        os.unlink(temp_path)
+        print(f"✓ Uploaded {self.DAEMON_PUPPY_FILE}")
 
     def _start_daemon(self):
-        """Start persistent daemon on EV3."""
+        """Start persistent daemon on EV3 (SSH only)."""
+        if self.transport == "micropython":
+            return  # MicroPython daemon should already be running
+        
         if self._daemon_running:
             return
         
         self._upload_daemon()
         
-        # Open channel and exec daemon
         transport = self._ev3._ssh.get_transport()
         self._channel = transport.open_session()
         self._channel.exec_command("cd /home/robot/ev3 && python3 -u puppy_daemon.py")
         
-        # Set up stdin for writing
         self._stdin = self._channel.makefile_stdin('wb', -1)
         self._stdout = self._channel.makefile('r', -1)
         
-        # Wait for READY signal
         response = self._stdout.readline().strip()
         if "READY" in response:
             self._daemon_running = True
-            print("✓ Daemon ready")
+            print("✓ Daemon ready (SSH)")
         else:
             raise RuntimeError("Daemon failed: " + response)
 
     def _send_command(self, cmd: str) -> str:
-        """Send command to daemon and get response."""
-        try:
-            self._stdin.write((cmd + "\n").encode())
-            self._stdin.flush()
-            response = self._stdout.readline().strip()
-            if not response and cmd != "quit":
-                raise OSError("Socket is closed")
+        """Send command to EV3 daemon and get response."""
+        if self.transport == "micropython":
+            # Async MicroPython interface
+            response, latency = self._run_async(self._ev3.send(cmd))
             return response
-        except (OSError, IOError) as e:
-            raise OSError("Socket is closed: " + str(e))
+        else:
+            # Legacy SSH stdin/stdout
+            try:
+                self._stdin.write((cmd + "\n").encode())
+                self._stdin.flush()
+                response = self._stdout.readline().strip()
+                if not response and cmd != "quit":
+                    raise OSError("Socket is closed")
+                return response
+            except (OSError, IOError) as e:
+                raise OSError("Socket is closed: " + str(e))
+
+    def _execute_sequence(self, action: str) -> str:
+        """Execute a puppy action sequence (MicroPython mode)."""
+        # get_action_adapter() auto-reloads if YAML file changed
+        adapter = get_action_adapter()
+        
+        if adapter is None or not adapter.has_action(action):
+            # Not a translated action, send directly (might be generic command)
+            return self._send_command(action)
+        
+        sequence = adapter.translate(action)
+        responses = []
+        
+        for cmd, delay_ms in sequence:
+            response = self._send_command(cmd)
+            responses.append(response)
+            if delay_ms > 0:
+                time.sleep(delay_ms / 1000.0)
+        
+        # Return combined result
+        if all("OK" in r or r.startswith("OK") for r in responses):
+            return "OK"
+        else:
+            return "; ".join(responses)
 
     def execute_action(self, action: str) -> dict:
-        """Execute action on remote EV3 (single command mode)."""
+        """Execute action on remote EV3."""
         result = {"action": action, "success": False, "remote": True}
         
         try:
             self._connect()
-            self._upload_daemon()
-            print("[RemotePuppy] Executing '%s'..." % action)
             
-            # For single commands, just run directly
-            stdout, stderr, code = self._ev3.execute_command(
-                "cd /home/robot/ev3 && echo '%s' | python3 -u puppy_daemon.py" % action,
-                timeout=30
-            )
-            
-            result["stdout"] = stdout.strip()
-            result["exit_code"] = code
-            result["success"] = "OK" in stdout or "READY" in stdout
-            
-            # Parse output (skip READY line)
-            lines = stdout.strip().split('\n')
-            for line in lines:
-                if line and line != "READY":
-                    print("[EV3] %s" % line)
-            if stderr.strip():
-                print("[EV3 Error] %s" % stderr.strip())
+            if self.transport == "micropython":
+                # MicroPython: translate puppy actions to sequences
+                print(f"[RemotePuppy] Executing '{action}' via MicroPython...")
+                response = self._execute_sequence(action)
+                result["response"] = response
+                result["success"] = "OK" in response or response.startswith("OK")
+                print(f"[EV3] {response}")
+            else:
+                # Legacy SSH: upload daemon and run
+                self._upload_daemon()
+                print("[RemotePuppy] Executing '%s' via SSH..." % action)
+                
+                stdout, stderr, code = self._ev3.execute_command(
+                    "cd /home/robot/ev3 && echo '%s' | python3 -u puppy_daemon.py" % action,
+                    timeout=30
+                )
+                
+                result["stdout"] = stdout.strip()
+                result["exit_code"] = code
+                result["success"] = "OK" in stdout or "READY" in stdout
+                
+                lines = stdout.strip().split('\n')
+                for line in lines:
+                    if line and line != "READY":
+                        print("[EV3] %s" % line)
+                if stderr.strip():
+                    print("[EV3 Error] %s" % stderr.strip())
                 
         except Exception as e:
             result["error"] = str(e)
@@ -1189,97 +1003,113 @@ Commands: standup, sitdown, bark, stretch, hop
         return result
 
     def flow(self):
-        """Interactive flow mode with persistent daemon - ultra low latency."""
-        print("=" * 50)
-        print("EV3 Puppy Flow Mode (Low Latency)")
-        print("=" * 50)
+        """Interactive flow mode using ProjectShell - ultra low latency."""
+        from core.project_shell import ProjectShell, Colors, colored
         
-        try:
+        def reload_actions():
+            """Force reload actions from YAML file."""
+            adapter = get_action_adapter(force_reload=True)
+            actions = adapter.list_actions() if adapter else []
+            return f"OK reloaded {len(actions)} actions: {', '.join(actions)}"
+        
+        def make_handler(cmd_name):
+            def handler(args):
+                full_cmd = f"{cmd_name} {args}".strip() if args else cmd_name
+                # For MicroPython, translate puppy actions to sequences
+                # get_action_adapter() auto-reloads if file changed
+                adapter = get_action_adapter()
+                if self.transport == "micropython" and adapter and adapter.has_action(cmd_name):
+                    return self._execute_sequence(cmd_name)
+                return self._send_command(full_cmd)
+            return handler
+        
+        # Define commands
+        commands = {
+            "standup": ("Stand up", make_handler("standup")),
+            "sitdown": ("Sit down", make_handler("sitdown")),
+            "bark": ("Bark (woof woof)", make_handler("bark")),
+            "stretch": ("Stretch", make_handler("stretch")),
+            "hop": ("Hop", make_handler("hop")),
+            "head_up": ("Move head up", make_handler("head_up")),
+            "head_down": ("Move head down", make_handler("head_down")),
+            "happy": ("Happy expression", make_handler("happy")),
+            "angry": ("Angry expression", make_handler("angry")),
+            "stop": ("Stop all motors", make_handler("stop")),
+            "eyes": ("Change eye display", make_handler("eyes"), "<style>"),
+            "info": ("Show motors/sensors/battery", make_handler("status")),
+            "reload": ("Reload actions.yaml (no restart needed)", lambda args: reload_actions()),
+        }
+        
+        # Eye styles as aliases
+        for style in ["neutral", "happy", "angry", "sleepy", "surprised", "love", "wink", "off"]:
+            commands[style] = (f"Eyes: {style}", make_handler(f"eyes {style}"))
+        
+        # Custom banner
+        banner = f"""
+{colored("=" * 50, Colors.CYAN)}
+{colored("  EV3 PUPPY - Interactive Shell", Colors.BOLD + Colors.CYAN)}
+{colored("=" * 50, Colors.CYAN)}
+"""
+        
+        # Connect function
+        def connect():
             self._connect()
             self._start_daemon()
-            
-            print("\nCommands: standup, sitdown, bark, stretch, hop")
-            print("          head_up, head_down, happy, angry, status, stop")
-            print("          eyes <style> - change display")
-            print("            styles: neutral, happy, angry, sleepy,")
-            print("                    surprised, love, wink, off")
-            print("          quit/exit/q - disconnect")
-            print("-" * 50)
-            
-            while True:
-                try:
-                    cmd = input("\n> ").strip().lower()
-                    
-                    if not cmd:
-                        continue
-                    
-                    if cmd in ("quit", "exit", "q"):
-                        self._send_command("quit")
-                        print("Goodbye!")
-                        break
-                    
-                    if cmd == "help":
-                        print("standup sitdown bark stretch hop")
-                        print("head_up head_down happy angry status stop")
-                        print("eyes <style>: neutral happy angry sleepy surprised love wink off")
-                        continue
-                    
-                    # Send to daemon - instant response!
-                    t0 = time.time()
-                    response = self._send_command(cmd)
-                    latency = (time.time() - t0) * 1000
-                    
-                    print("[EV3] %s (%.0fms)" % (response, latency))
-                        
-                except KeyboardInterrupt:
-                    print("\n\nInterrupted.")
-                    try:
-                        self._send_command("quit")
-                    except:
-                        pass
-                    break
-                except EOFError:
-                    print("\nGoodbye!")
-                    break
-                except OSError as e:
-                    if "Socket is closed" in str(e) or "closed" in str(e).lower():
-                        print("\n[Disconnected] EV3 connection closed (back button?)")
-                        break
-                    print("[Error] %s" % e)
-                except Exception as e:
-                    err_str = str(e).lower()
-                    if "socket" in err_str or "closed" in err_str or "eof" in err_str:
-                        print("\n[Disconnected] Connection lost")
-                        break
-                    print("[Error] %s" % e)
-                    
-        except Exception as e:
-            print("Connection error: %s" % e)
-        finally:
+            return True
+        
+        # Disconnect function  
+        def disconnect():
+            try:
+                self._send_command("quit")
+            except:
+                pass
             self.disconnect()
+        
+        # Create and run shell
+        shell = ProjectShell(
+            name="Puppy",
+            commands=commands,
+            connect_func=connect,
+            disconnect_func=disconnect,
+            banner=banner,
+        )
+        
+        shell.run()
 
     def disconnect(self):
         """Disconnect from EV3."""
-        if hasattr(self, '_stdin') and self._stdin:
-            try:
-                self._stdin.close()
-            except:
-                pass
-        if hasattr(self, '_stdout') and self._stdout:
-            try:
-                self._stdout.close()
-            except:
-                pass
-        if self._channel:
-            try:
-                self._channel.close()
-            except:
-                pass
-            self._channel = None
-        self._daemon_running = False
-        if self._ev3:
-            self._ev3.disconnect()
-            self._ev3 = None
+        if self.transport == "micropython":
+            # MicroPython async disconnect
+            if self._ev3:
+                try:
+                    self._run_async(self._ev3.disconnect())
+                except:
+                    pass
+                self._ev3 = None
+        else:
+            # Legacy SSH cleanup
+            if hasattr(self, '_stdin') and self._stdin:
+                try:
+                    self._stdin.close()
+                except:
+                    pass
+            if hasattr(self, '_stdout') and self._stdout:
+                try:
+                    self._stdout.close()
+                except:
+                    pass
+            if self._channel:
+                try:
+                    self._channel.close()
+                except:
+                    pass
+                self._channel = None
+            self._daemon_running = False
+            if self._ev3:
+                self._ev3.disconnect()
+                self._ev3 = None
+        
+        self._connected = False
 
 
 # -----------------------------------------------------------------------------
@@ -1291,8 +1121,9 @@ def run_with_config(cfg: DictConfig):
     config = PuppyConfig.from_hydra(cfg)
     action = cfg.get("action", "run")
     connection_mode = cfg.connection.get("mode", "remote") if hasattr(cfg, 'connection') else "remote"
+    transport = cfg.connection.get("transport", "micropython") if hasattr(cfg, 'connection') else "micropython"
     
-    # Determine mode: local (on EV3), remote (SSH), or mock
+    # Determine mode: local (on EV3), remote (MicroPython/SSH), or mock
     if ON_EV3 or connection_mode == "local":
         # Running directly on EV3 or forced local mode
         mode = "EV3" if ON_EV3 else "Mock"
@@ -1300,19 +1131,26 @@ def run_with_config(cfg: DictConfig):
         puppy = Puppy(config)
         result = puppy.execute_action(action)
     else:
-        # Remote mode - send commands via SSH
+        # Remote mode - default MicroPython, fallback to SSH
         host = cfg.connection.get("host", "ev3dev.local")
-        print("[EV3 Puppy] Action: %s, Mode: Remote (%s)" % (action, host))
+        transport_str = "MicroPython" if transport == "micropython" else "SSH"
+        print(f"[EV3 Puppy] Action: {action}, Mode: Remote ({host}, {transport_str})")
         
-        if not EV3_INTERFACE_AVAILABLE:
-            print("Error: ev3_interface not available. Install paramiko.")
-            return {"success": False, "error": "ev3_interface not available"}
+        # Check availability
+        if transport == "micropython" and not EV3_MICROPYTHON_AVAILABLE:
+            print("Warning: EV3MicroPython not available, falling back to SSH")
+            transport = "ssh"
+        
+        if transport == "ssh" and not EV3_INTERFACE_AVAILABLE:
+            print("Error: No EV3 interface available. Install pyserial or paramiko.")
+            return {"success": False, "error": "No EV3 interface available"}
         
         remote = RemotePuppy(
             host=host,
             user=cfg.connection.get("user", "robot"),
             password=cfg.connection.get("password", "maker"),
             sudo_password=cfg.connection.get("sudo_password", "maker"),
+            transport=transport,
         )
         
         # Flow mode - interactive session
@@ -1347,6 +1185,8 @@ else:
                           help="EV3 hostname")
         parser.add_argument("--local", action="store_true",
                           help="Run locally (mock mode)")
+        parser.add_argument("--ssh", action="store_true",
+                          help="Use legacy SSH transport (default: MicroPython)")
         parser.add_argument("--flow", action="store_const", const="flow",
                           dest="action", help="Interactive flow mode")
         parser.add_argument("--standup", action="store_const", const="standup",
@@ -1370,6 +1210,7 @@ else:
         args = parser.parse_args()
         
         action = args.action or "status"
+        transport = "ssh" if args.ssh else "micropython"
         
         if args.local or ON_EV3:
             puppy = Puppy()
@@ -1377,10 +1218,16 @@ else:
             if action == "status":
                 print(json.dumps(result.get("status", {}), indent=2))
         else:
-            if not EV3_INTERFACE_AVAILABLE:
-                print("Error: ev3_interface not available. Use --local for mock mode.")
+            # Check availability
+            if transport == "micropython" and not EV3_MICROPYTHON_AVAILABLE:
+                print("Warning: EV3MicroPython not available, trying SSH...")
+                transport = "ssh"
+            
+            if transport == "ssh" and not EV3_INTERFACE_AVAILABLE:
+                print("Error: No EV3 interface available. Use --local for mock mode.")
                 return
-            remote = RemotePuppy(host=args.host)
+            
+            remote = RemotePuppy(host=args.host, transport=transport)
             
             # Flow mode - interactive session
             if action == "flow":

@@ -2,16 +2,59 @@
 
 Unified control framework for multiple LEGO robots. **The Orchestra is platform-agnostic** - control EV3s and Spike Primes through a single interface with synchronized, low-latency commands.
 
-## Key Concept
+## ⚡ New: MicroPython Interface (Default)
+
+EV3 now uses **Pybricks MicroPython** by default with **1-15ms latency** (up to 10x faster than legacy SSH!):
+
+```python
+from platforms.ev3 import EV3MicroPython
+
+async with EV3MicroPython() as ev3:
+    await ev3.beep(880, 200)  # ~2-5ms via USB!
+```
+
+See `platforms/ev3/README.md` for setup instructions.
+
+## Key Concepts
 
 - **Orchestra/Conductor**: Platform-agnostic layer that controls any device
 - **Devices**: Hardware platforms (EV3, Spike Prime) - each with specific interfaces
 - **Projects**: Device-specific behaviors (e.g., "puppy" uses specific EV3 motors)
+- **Action Translation**: Host translates project actions to generic daemon commands
 
 ```
 Orchestra (agnostic) ──► EV3 device ──► puppy project
                     ──► Spike Prime ──► (built-in actions)
 ```
+
+### Generic Daemon + Action Adapter
+
+The EV3 daemon is **intentionally generic** - projects define actions in YAML:
+
+```
+┌──────────────────────────────────────┐     ┌────────────────────┐
+│               HOST                   │     │   EV3 (daemon)     │
+├──────────────────────────────────────┤     ├────────────────────┤
+│                                      │     │                    │
+│  projects/puppy/                     │     │  Generic commands: │
+│  └── configs/actions.yaml            │     │  - motor D -25     │
+│      ┌────────────────┐              │     │  - motor A -25     │
+│      │ sitdown:       │              │     │  - eyes sleepy     │
+│      │   - eyes sleepy│──── TCP ────►│  - stop            │
+│      │   - motor D -25│     USB      │  - beep            │
+│      │   - motor A -25│              │  - speak           │
+│      │   - stop       │              │                    │
+│      └────────────────┘              │     │  No project logic! │
+│                                      │     │                    │
+│  platforms/ev3/action_adapter.py     │     │                    │
+│  (loads YAML, translates actions)    │     │                    │
+└──────────────────────────────────────┘     └────────────────────┘
+```
+
+**Benefits**:
+- Define actions in YAML - no code changes!
+- Daemon stays generic and reusable
+- Add new projects without touching daemon or adapter code
 
 ## Architecture
 
@@ -20,8 +63,8 @@ Orchestra (agnostic) ──► EV3 device ──► puppy project
 │                              HOST                                   │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
-│   projects/orchestra/              (Platform-Agnostic)              │
-│   └── conductor.py                 Controls ANY device uniformly    │
+│   projects/collaborate_test/       (Platform-Agnostic)              │
+│   └── collaborate_test.py          Controls ANY device uniformly    │
 │       ├── parallel()               Send to all at once              │
 │       └── sequence()               Choreographed timing             │
 │                                                                     │
@@ -29,8 +72,9 @@ Orchestra (agnostic) ──► EV3 device ──► puppy project
 │                                                                     │
 │   platforms/                       (Device-Specific Implementations)│
 │   ├── ev3/                                                          │
-│   │   ├── ev3_interface.py         EV3Interface (SSH)               │
-│   │   └── ev3_daemon.py            EV3 daemon base                  │
+│   │   ├── ev3_micropython.py       EV3MicroPython (USB/WiFi) ⚡     │
+│   │   ├── pybricks_daemon.py       Pybricks daemon                  │
+│   │   └── ev3_interface.py         Legacy SSH (fallback)            │
 │   └── spike_prime/                 ✓ IMPLEMENTED                    │
 │       ├── sp_interface.py          SpikeInterface (BLE)             │
 │       └── sp_fast.py               SpikeFastInterface (low-latency) │
@@ -44,16 +88,16 @@ Orchestra (agnostic) ──► EV3 device ──► puppy project
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
                           │
-                          │ SSH / BLE
+                          │ USB Serial / WiFi TCP / BLE
                           ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          DEVICES                                    │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
-│   EV3 Brick (ev3dev.local)         Spike Prime Hub (BLE)            │
-│   ├── puppy_daemon.py              ├── Pre-uploaded programs        │
+│   EV3 Brick (Pybricks)             Spike Prime Hub (BLE)            │
+│   ├── pybricks_daemon.py           ├── Pre-uploaded programs        │
 │   ├── Motors, sensors              ├── Light matrix                 │
-│   └── ~30ms latency                └── ~10-50ms latency             │
+│   └── ~1-15ms latency ⚡           └── ~10-50ms latency             │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -63,17 +107,13 @@ Orchestra (agnostic) ──► EV3 device ──► puppy project
 ### 🎼 Orchestra Interactive Shell (WIP)
 
 ```bash
-# Start interactive shell
-python orchestra.py
+# Interactive mode
+python main.py collaborate_test
 
-# Connect to EV3
-python orchestra.py --ev3 192.168.68.111
-
-# Connect to Spike Prime
-python orchestra.py --spike E1BDF5C6-C666-... --spike-name "Avatar Karo"
-
-# Connect to both
-python orchestra.py --ev3 192.168.68.111 --spike E1BDF5C6-... --spike-name "Avatar Karo"
+# Run specific tests
+python main.py collaborate_test parallel
+python main.py collaborate_test sync
+python main.py collaborate_test seq
 ```
 
 **Inside the shell:**
@@ -94,10 +134,10 @@ python orchestra.py --ev3 192.168.68.111 --spike E1BDF5C6-... --spike-name "Avat
 [ev3 sp] ⚡ quit
 ```
 
-### Orchestra Test Scripts
+### Collaborate Test Scripts
 
 ```bash
-cd projects/orchestra
+cd projects/collaborate_test
 
 # Both devices at once: Spike beeps, EV3 barks
 python test_beep_woof.py
@@ -127,7 +167,7 @@ python platforms/spike_prime/sp_fast.py flow
 
 ## Configuration
 
-### Device Settings (`projects/orchestra/configs/devices.yaml`)
+### Device Settings (`projects/collaborate_test/configs/devices.yaml`)
 
 ```yaml
 devices:
@@ -143,7 +183,7 @@ devices:
     address: E1BDF5C6-C666-4E77-A7E8-458FC0A9F809
 ```
 
-### Project Mapping (`projects/orchestra/configs/config.yaml`)
+### Project Mapping (`projects/collaborate_test/configs/config.yaml`)
 
 ```yaml
 # Which project runs on which device
@@ -193,14 +233,16 @@ async with conductor:
 
 | Device | Method | Latency |
 |--------|--------|---------|
-| EV3 | Daemon (SSH) | ~30-50ms |
+| **EV3** | **MicroPython (USB)** | **~1-5ms** ⚡ |
+| **EV3** | **MicroPython (WiFi)** | **~5-15ms** ⚡ |
+| EV3 | Legacy SSH | ~30-50ms |
 | Spike Prime | Fast (fire-and-forget) | ~10-30ms |
 | **Parallel** | asyncio.gather | ~max(both) |
 
 ## Project Structure
 
 ```
-lego_orchestra/
+EV3SP/
 ├── main.py                    # Entry point
 ├── README.md
 ├── requirements.txt
@@ -213,7 +255,9 @@ lego_orchestra/
 │
 ├── platforms/                 # Device-specific implementations
 │   ├── ev3/
-│   │   ├── ev3_interface.py   # EV3Interface, EV3DaemonSession
+│   │   ├── ev3_micropython.py # ⚡ EV3MicroPython (USB/WiFi, 1-15ms)
+│   │   ├── pybricks_daemon.py # Daemon for Pybricks MicroPython
+│   │   ├── ev3_interface.py   # Legacy SSH (30-50ms)
 │   │   └── README.md
 │   └── spike_prime/
 │       ├── sp_interface.py    # SpikeInterface (BLE)
@@ -227,13 +271,13 @@ lego_orchestra/
 │   └── pybricks-protocol/     # Pybricks examples
 │
 └── projects/
-    ├── orchestra/             # ★ Platform-agnostic controller
-    │   ├── conductor.py       # Multi-device orchestrator
+    ├── collaborate_test/      # ★ Platform-agnostic controller
+    │   ├── collaborate_test.py # Multi-device orchestrator
     │   ├── test_beep_woof.py  # Demo test
     │   └── configs/
     └── puppy/                 # EV3-specific project
-        ├── puppy.py
-        └── puppy_daemon.py
+        ├── puppy.py           # Host controller + PUPPY_ACTION_SEQUENCES
+        └── puppy_daemon.py    # Legacy ev3dev daemon (SSH mode)
 ```
 
 ## Available Actions
@@ -266,9 +310,10 @@ lego_orchestra/
 
 ### [EV3](platforms/ev3/README.md) - LEGO MINDSTORMS EV3
 
-- SSH connection to ev3dev
-- Daemon-based low-latency control (~30ms)
+- **Default: Pybricks MicroPython** (USB Serial / WiFi TCP)
+- Ultra-low latency: **1-15ms** ⚡
 - Display, sound, motors, sensors
+- Legacy SSH mode available (30-50ms)
 
 ### [Spike Prime](platforms/spike_prime/README.md) - LEGO Spike Prime
 
@@ -314,11 +359,17 @@ Key references:
 - [x] **Spike Prime platform**
 - [x] **Spike Prime fast interface** (~10-50ms)
 - [x] **Orchestra multi-device control**
-- [🚧] **Orchestra Interactive Shell** (WIP) - `python orchestra.py`
+- [x] **EV3 MicroPython interface** ⚡ (~1-15ms, 10x faster!)
+  - [x] USB Serial transport
+  - [x] WiFi TCP transport
+  - [x] Bluetooth RFCOMM transport
+  - [x] Auto-detection (USB → WiFi → Bluetooth)
+- [🚧] **Collaborate Test Interactive Shell** (WIP) - `python main.py collaborate_test`
   - [x] Unified command registry (`core/commands.py`)
   - [x] Tab completion & history
   - [x] EV3 universal daemon (`platforms/ev3/universal_daemon.py`)
   - [x] Multi-target commands (`ev3 beep`, `sp display`, `all status`)
+  - [x] MicroPython transport support
   - [ ] Config file loading
   - [ ] Spike Prime sensor/motor status
 - [ ] Time-synchronized commands

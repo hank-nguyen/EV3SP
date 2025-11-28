@@ -9,11 +9,12 @@ Key components:
 - Collaboration patterns: Signal-based, choreographed, parallel
 - Commands: Unified command registry for all platforms
 - Shell: Interactive terminal interface
+- ProjectShell: Reusable shell utility for any project
 - Utilities: Graceful shutdown, async cleanup
 """
 
 from .interface import RobotInterface, DaemonSession
-from .types import MotorState, SensorState, RobotState, Platform, ConnectionConfig
+from .types import MotorState, SensorState, RobotState, Platform, Transport, ConnectionConfig
 from .collaboration import (
     Signal,
     SignalQueue,
@@ -34,6 +35,17 @@ from .commands import (
     get_ev3_command,
     get_spike_action,
 )
+from .project_shell import (
+    ProjectShell,
+    ShellCommand,
+    Colors,
+    colored,
+    success,
+    error,
+    warning,
+    info,
+    create_shell,
+)
 
 __all__ = [
     # Interfaces
@@ -45,6 +57,7 @@ __all__ = [
     'SensorState',
     'RobotState',
     'Platform',
+    'Transport',
     'ConnectionConfig',
     
     # Collaboration
@@ -66,5 +79,16 @@ __all__ = [
     'parse_command_line',
     'get_ev3_command',
     'get_spike_action',
+    
+    # Project Shell
+    'ProjectShell',
+    'ShellCommand',
+    'Colors',
+    'colored',
+    'success',
+    'error',
+    'warning',
+    'info',
+    'create_shell',
 ]
 

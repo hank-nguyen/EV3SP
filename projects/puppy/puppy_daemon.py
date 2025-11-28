@@ -19,16 +19,20 @@ import sys
 import time
 import json
 import subprocess
+import select
 
-# ev3dev2 imports
+# Core ev3dev2 imports (always needed)
 from ev3dev2.motor import LargeMotor, MediumMotor, OUTPUT_A, OUTPUT_C, OUTPUT_D
-from ev3dev2.sensor.lego import TouchSensor, ColorSensor
-from ev3dev2.sensor import INPUT_1, INPUT_4
 from ev3dev2.sound import Sound
 from ev3dev2.display import Display
 from ev3dev2.button import Button
+
+# PIL for display drawing
 from PIL import Image, ImageDraw
-import select
+
+# Lazy-loaded (sensors are optional, only for status)
+TouchSensor = None
+ColorSensor = None
 
 # ==============================================================================
 # Configuration
@@ -55,7 +59,8 @@ color_sensor = None
 
 
 def init_hardware():
-    global left_motor, right_motor, head_motor, touch_sensor, color_sensor
+    """Initialize motors (fast). Sensors are lazy-loaded on first status call."""
+    global left_motor, right_motor, head_motor
     
     try:
         left_motor = LargeMotor(OUTPUT_D)
@@ -71,16 +76,33 @@ def init_hardware():
         head_motor = MediumMotor(OUTPUT_C)
     except Exception as e:
         sys.stderr.write("Head motor: " + str(e) + "\n")
+
+
+def init_sensors():
+    """Lazy-load sensors only when needed (status command)."""
+    global touch_sensor, color_sensor, TouchSensor, ColorSensor
     
-    try:
-        touch_sensor = TouchSensor(INPUT_1)
-    except Exception as e:
-        sys.stderr.write("Touch sensor: " + str(e) + "\n")
+    # Lazy import sensor modules
+    if TouchSensor is None:
+        try:
+            from ev3dev2.sensor.lego import TouchSensor as TS, ColorSensor as CS
+            TouchSensor = TS
+            ColorSensor = CS
+        except ImportError:
+            return
     
-    try:
-        color_sensor = ColorSensor(INPUT_4)
-    except Exception as e:
-        sys.stderr.write("Color sensor: " + str(e) + "\n")
+    # Initialize sensors (INPUT_1 = "in1", INPUT_4 = "in4")
+    if touch_sensor is None:
+        try:
+            touch_sensor = TouchSensor("in1")
+        except Exception as e:
+            sys.stderr.write("Touch sensor: " + str(e) + "\n")
+    
+    if color_sensor is None:
+        try:
+            color_sensor = ColorSensor("in4")
+        except Exception as e:
+            sys.stderr.write("Color sensor: " + str(e) + "\n")
 
 
 # ==============================================================================
@@ -191,11 +213,14 @@ def standup():
     if not left_motor or not right_motor:
         return "ERR: motors"
     draw_eyes("neutral")
-    left_motor.on_for_degrees(speed=30, degrees=25, block=False)
-    right_motor.on_for_degrees(speed=30, degrees=25, block=True)
+    left_motor.on_for_degrees(speed=80, degrees=50, block=False)
+    right_motor.on_for_degrees(speed=80, degrees=50, block=True)
     time.sleep(0.3)
-    left_motor.on_for_degrees(speed=25, degrees=40, block=False)
-    right_motor.on_for_degrees(speed=25, degrees=40, block=True)
+    left_motor.on_for_degrees(speed=60, degrees=60, block=False)
+    right_motor.on_for_degrees(speed=60, degrees=60, block=True)
+    time.sleep(0.3)
+    left_motor.on_for_degrees(speed=40, degrees=70, block=False)
+    right_motor.on_for_degrees(speed=40, degrees=70, block=True)
     return "OK"
 
 
@@ -255,7 +280,7 @@ def hop():
 def head_up():
     draw_eyes("neutral")
     if head_motor:
-        head_motor.on_for_degrees(speed=15, degrees=40)
+        head_motor.on_for_degrees(speed=90, degrees=60)
         return "OK"
     return "ERR: head"
 
@@ -263,14 +288,14 @@ def head_up():
 def head_down():
     draw_eyes("sleepy")
     if head_motor:
-        head_motor.on_for_degrees(speed=15, degrees=-40)
+        head_motor.on_for_degrees(speed=90, degrees=-60)
         return "OK"
     return "ERR: head"
 
 
 def happy():
     draw_eyes("love")
-    sound.speak("woof")
+    sound.speak("woof woof")  # Longer phrase for TTS
     if left_motor and right_motor:
         left_motor.on(speed=50)
         right_motor.on(speed=50)
@@ -284,36 +309,71 @@ def happy():
         left_motor.off()
         right_motor.off()
     draw_eyes("happy")
-    sound.speak("woof")
+    sound.speak("happy happy")  # Longer phrase
     return "OK"
 
 
 def angry():
     draw_eyes("angry")
-    sound.speak("grrr")
+    sound.speak("grrr grrr")  # Longer phrase for TTS
     if left_motor and right_motor:
         left_motor.on_for_degrees(speed=30, degrees=25, block=False)
         right_motor.on_for_degrees(speed=30, degrees=25, block=True)
         time.sleep(0.3)
         left_motor.on_for_degrees(speed=25, degrees=40, block=False)
         right_motor.on_for_degrees(speed=25, degrees=40, block=True)
-    sound.speak("woof woof")
+    sound.speak("woof woof woof")  # Longer phrase
     return "OK"
 
 
 def status():
-    result = {"m": {}, "s": {}}
+    """Get detailed hardware status: battery, motors (port+position), sensors."""
+    init_sensors()  # Lazy-load sensors only when status is requested
+    
+    lines = []
+    
+    # Battery voltage (read from sysfs)
+    try:
+        with open("/sys/class/power_supply/lego-ev3-battery/voltage_now") as f:
+            voltage_uv = int(f.read().strip())
+            voltage = round(voltage_uv / 1000000, 2)
+            # Battery status indicator
+            if voltage >= 7.5:
+                status = "OK"
+            elif voltage >= 7.0:
+                status = "LOW"
+            else:
+                status = "CRITICAL"
+            lines.append("Battery: {}V ({})".format(voltage, status))
+    except:
+        lines.append("Battery: N/A")
+    
+    # Motors with port info
+    motors = []
     if left_motor:
-        result["m"]["l"] = left_motor.position
+        motors.append("Left(D): pos={}".format(left_motor.position))
     if right_motor:
-        result["m"]["r"] = right_motor.position
+        motors.append("Right(A): pos={}".format(right_motor.position))
     if head_motor:
-        result["m"]["h"] = head_motor.position
+        motors.append("Head(C): pos={}".format(head_motor.position))
+    if motors:
+        lines.append("Motors: " + ", ".join(motors))
+    else:
+        lines.append("Motors: None connected")
+    
+    # Sensors with port info
+    sensors = []
     if touch_sensor:
-        result["s"]["t"] = touch_sensor.is_pressed
+        pressed = "PRESSED" if touch_sensor.is_pressed else "released"
+        sensors.append("Touch(1): {}".format(pressed))
     if color_sensor:
-        result["s"]["c"] = color_sensor.color_name
-    return json.dumps(result)
+        sensors.append("Color(4): {}".format(color_sensor.color_name))
+    if sensors:
+        lines.append("Sensors: " + ", ".join(sensors))
+    else:
+        lines.append("Sensors: None connected")
+    
+    return " | ".join(lines)
 
 
 def stop():

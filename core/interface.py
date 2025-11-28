@@ -2,6 +2,15 @@
 Abstract Robot Interface
 ------------------------
 Platform-agnostic interface for robot communication.
+
+For EV3 with Pybricks MicroPython (recommended, lowest latency):
+    from platforms.ev3 import EV3MicroPython
+    
+    async with EV3MicroPython() as ev3:
+        await ev3.beep(880, 200)  # ~2-5ms via USB!
+
+For legacy ev3dev SSH interface:
+    from platforms.ev3 import EV3Interface, EV3DaemonSession
 """
 
 from abc import ABC, abstractmethod
@@ -142,18 +151,88 @@ class DaemonSession(ABC):
         self.stop()
 
 
-def get_interface(config: ConnectionConfig) -> RobotInterface:
-    """Factory function to get platform-specific interface."""
-    from .types import Platform
+def get_ev3_interface(config: ConnectionConfig):
+    """
+    Get EV3 interface based on transport config.
     
-    if config.platform == Platform.EV3:
+    Default (MicroPython): Returns EV3MicroPython (async, 1-15ms latency)
+    Legacy (SSH): Returns EV3Interface (sync, 30-50ms latency)
+    
+    Usage:
+        # MicroPython (recommended)
+        config = ConnectionConfig(platform=Platform.EV3, transport=Transport.AUTO)
+        ev3 = get_ev3_interface(config)
+        async with ev3:
+            await ev3.beep(880, 200)
+        
+        # Legacy SSH
+        config = ConnectionConfig(platform=Platform.EV3, transport=Transport.SSH)
+        ev3 = get_ev3_interface(config)
+        ev3.connect()
+    """
+    from .types import Platform, Transport
+    
+    if config.platform != Platform.EV3:
+        raise ValueError(f"Expected EV3 platform, got {config.platform}")
+    
+    if config.transport == Transport.SSH:
+        # Legacy SSH interface
         from platforms.ev3.ev3_interface import EV3Interface
         return EV3Interface(
             host=config.host,
             user=config.user,
             password=config.password,
-            port=config.port,
+            port=config.ssh_port,
         )
+    else:
+        # Default: MicroPython (USB/WiFi/Bluetooth)
+        from platforms.ev3.ev3_micropython import EV3MicroPython, EV3Config
+        ev3_config = EV3Config(
+            wifi_host=config.host,
+            wifi_port=config.wifi_port,
+            usb_port=config.usb_port,
+            usb_baudrate=config.usb_baudrate,
+            bt_address=config.bt_address,
+            bt_channel=config.bt_channel,
+        )
+        transport_map = {
+            Transport.AUTO: None,
+            Transport.USB: "usb",
+            Transport.WIFI: "wifi",
+            Transport.BLUETOOTH: "bluetooth",
+        }
+        return EV3MicroPython(
+            config=ev3_config,
+            transport=transport_map.get(config.transport),
+        )
+
+
+def get_interface(config: ConnectionConfig) -> RobotInterface:
+    """
+    Factory function to get platform-specific interface.
+    
+    DEPRECATED for EV3: Use get_ev3_interface() or import EV3MicroPython directly.
+    The new MicroPython interface is async and much faster (1-15ms vs 30-50ms).
+    """
+    from .types import Platform, Transport
+    
+    if config.platform == Platform.EV3:
+        # Check if using legacy SSH transport
+        if config.transport == Transport.SSH:
+            from platforms.ev3.ev3_interface import EV3Interface
+            return EV3Interface(
+                host=config.host,
+                user=config.user,
+                password=config.password,
+                port=config.ssh_port,
+            )
+        else:
+            # For non-SSH transports, recommend using get_ev3_interface() or EV3MicroPython directly
+            raise NotImplementedError(
+                "For EV3 with MicroPython, use:\n"
+                "  from platforms.ev3 import EV3MicroPython\n"
+                "  async with EV3MicroPython() as ev3: ..."
+            )
     elif config.platform == Platform.SPIKE_PRIME:
         # Spike Prime uses async interface - return config for async usage
         from platforms.spike_prime import SpikeInterface
@@ -168,11 +247,21 @@ def get_interface(config: ConnectionConfig) -> RobotInterface:
 
 def get_daemon_session(interface: RobotInterface, daemon_script: str, 
                        sudo_password: str = "maker") -> DaemonSession:
-    """Factory function to get platform-specific daemon session."""
+    """
+    Factory function to get platform-specific daemon session.
+    
+    DEPRECATED: EV3MicroPython doesn't need separate daemon sessions.
+    Use EV3MicroPython directly for lowest latency.
+    
+    This function only works with legacy SSH interface (EV3Interface).
+    """
     from platforms.ev3.ev3_interface import EV3Interface, EV3DaemonSession
     
     if isinstance(interface, EV3Interface):
         return EV3DaemonSession(interface, daemon_script, sudo_password)
     else:
-        raise NotImplementedError("Daemon session not implemented for this platform")
+        raise NotImplementedError(
+            "Daemon session not needed for MicroPython interface.\n"
+            "Use EV3MicroPython directly: await ev3.send('command')"
+        )
 

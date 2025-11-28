@@ -38,7 +38,7 @@ from platforms.spike_prime.sp_interface import PATTERNS
 # ============================================================
 # Program Generators (Spike App 3 API)
 # ============================================================
-# Reference: lego_docs/examples/python/app.py
+# Reference: protocols/spike-prime-protocol/examples/python/app.py
 # 
 # Spike App 3 API Rules:
 # - sound.beep() requires AWAIT: `await sound.beep(freq, duration)`

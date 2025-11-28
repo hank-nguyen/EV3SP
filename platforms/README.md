@@ -6,45 +6,61 @@ The `platforms/` directory contains implementations for specific robot hardware.
 
 ```
 platforms/
-├── ev3/           # LEGO Mindstorms EV3
-│   ├── ev3_interface.py    # RobotInterface implementation
-│   ├── ev3_daemon.py       # Generic daemon template
-│   └── ev3_client.py       # SSH client wrapper
+├── ev3/                    # LEGO Mindstorms EV3
+│   ├── ev3_micropython.py  # ★ DEFAULT: USB/WiFi TCP (~1-15ms)
+│   ├── pybricks_daemon.py  # Daemon for Pybricks MicroPython
+│   ├── ev3_interface.py    # Legacy: SSH interface (~30-50ms)
+│   ├── ev3_daemon.py       # Legacy: ev3dev daemon
+│   └── ev3_client.py       # Legacy: SSH client wrapper
 │
-├── spike_prime/   # LEGO Spike Prime
+├── spike_prime/            # LEGO Spike Prime
 │   ├── sp_interface.py     # BLE communication + LEGO protocol
 │   ├── sp_fast.py          # Optimized interface (pre-upload, sequences)
-│   └── lego_docs/          # Official LEGO protocol documentation
+│   └── (see protocols/)    # Official LEGO protocol documentation
 │
-└── README.md      # This file
+└── README.md               # This file
 ```
 
 ## Platform Comparison
 
-| Aspect | EV3 | Spike Prime |
-|--------|-----|-------------|
-| **OS** | ev3dev (Linux) | LEGO firmware |
-| **Python** | 3.4 (MicroPython-like) | MicroPython |
-| **Connection** | SSH over WiFi | BLE (Bluetooth) |
-| **Protocol** | stdin/stdout text | COBS + CRC binary |
-| **Latency** | 20-50ms (daemon) | 50-300ms |
-| **Real-time Control** | ✅ Streaming | ❌ Per-program |
+| Aspect | EV3 (MicroPython) | EV3 (ev3dev) | Spike Prime |
+|--------|-------------------|--------------|-------------|
+| **Firmware** | Pybricks | ev3dev-stretch | LEGO App 3 |
+| **Python** | MicroPython | Python 3.4 | MicroPython |
+| **Connection** | USB / WiFi TCP | SSH over WiFi | BLE |
+| **Protocol** | stdin/stdout text | SSH + stdin | COBS + CRC binary |
+| **Latency** | **1-15ms** | 30-50ms | 50-300ms |
+| **Real-time Control** | ✅ Streaming | ✅ Streaming | ❌ Per-program |
 
 ## EV3 Platform
 
-### Strengths
-- **True daemon**: Persistent process accepts commands via stdin
-- **Low latency**: ~20-50ms per command with daemon
-- **Full Linux**: Shell access, file system, debugging
-- **No startup sounds**: Silent operation
+### Default: MicroPython (Recommended) ⚡
 
-### Architecture
-```
-Host (Python) → SSH → ev3dev (Linux) → daemon.py → Hardware
-                      └── stdin/stdout ──┘
+**Latency: 1-15ms** - Up to 10x faster than legacy SSH!
+
+```python
+from platforms.ev3 import EV3MicroPython, EV3Config
+
+# Auto-detect (tries USB first, then WiFi)
+async with EV3MicroPython() as ev3:
+    response, latency = await ev3.beep(880, 200)
+    print(f"Latency: {latency:.1f}ms")  # ~2-5ms via USB!
+
+# Force specific transport
+config = EV3Config(wifi_host="192.168.1.100", wifi_port=9000)
+ev3 = EV3MicroPython(config=config, transport="wifi")
 ```
 
-### Usage
+**Transport options:**
+- `usb` - USB Serial (~1-5ms) - fastest, requires cable
+- `wifi` - TCP Socket (~5-15ms) - no SSH overhead
+- `bluetooth` - RFCOMM (~10-20ms) - wireless, needs pairing
+- `auto` - Try all in order (default)
+
+### Legacy: ev3dev SSH
+
+**Latency: 30-50ms** - Still available for backward compatibility.
+
 ```python
 from platforms.ev3 import EV3Interface, EV3DaemonSession
 
@@ -53,6 +69,12 @@ session = EV3DaemonSession(interface, "my_daemon.py", "maker")
 session.start(daemon_code)
 response = session.send("bark")  # ~30ms
 ```
+
+### EV3 Strengths
+- **True daemon**: Persistent process accepts commands via stdin
+- **Low latency**: ~1-50ms depending on transport
+- **Full control**: Display, sound, motors, sensors
+- **No startup sounds**: Silent operation
 
 ## Spike Prime Platform
 
@@ -127,5 +149,4 @@ Key message types:
 - 0x21: ConsoleNotification (print from hub)
 ```
 
-See `lego_docs/` for full protocol specification.
-
+See `protocols/spike-prime-protocol/` for full protocol specification.

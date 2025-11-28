@@ -4,7 +4,7 @@ Spike Prime API Reference Tests
 -------------------------------
 Tests the correct Spike App 3 APIs.
 
-Reference: lego_docs/examples/python/app.py
+Reference: protocols/spike-prime-protocol/examples/python/app.py
 
 Key findings:
 - sound.beep() requires AWAIT
@@ -76,7 +76,7 @@ async def main():
     print("=" * 60)
     print("SPIKE PRIME API REFERENCE TESTS")
     print("=" * 60)
-    print("Reference: lego_docs/examples/python/app.py")
+    print("Reference: protocols/spike-prime-protocol/examples/python/app.py")
     print()
     
     async with SpikeInterface(ADDRESS, NAME) as spike:

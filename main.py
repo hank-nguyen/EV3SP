@@ -78,6 +78,7 @@ def run_project(project: str, action: str = "flow"):
 # Project registry: name -> platform hint (for display only)
 PROJECTS = {
     "puppy": "ev3",  # Platform hint (project is still agnostic)
+    "collaborate_test": "ev3+spike",  # Multi-device collaboration test
 }
 
 

@@ -38,69 +38,10 @@ from core.commands import (
     Platform, Command
 )
 
-
-# ============================================================
-# ANSI COLORS
-# ============================================================
-
-class Colors:
-    """ANSI color codes for terminal output."""
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    
-    # Standard colors
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    MAGENTA = "\033[35m"
-    CYAN = "\033[36m"
-    WHITE = "\033[37m"
-    
-    # Bright colors
-    BRIGHT_RED = "\033[91m"
-    BRIGHT_GREEN = "\033[92m"
-    BRIGHT_YELLOW = "\033[93m"
-    BRIGHT_BLUE = "\033[94m"
-    BRIGHT_MAGENTA = "\033[95m"
-    BRIGHT_CYAN = "\033[96m"
-    
-    # Background
-    BG_RED = "\033[41m"
-    BG_GREEN = "\033[42m"
-    BG_BLUE = "\033[44m"
-
-
-def colored(text: str, color: str) -> str:
-    """Apply color to text."""
-    return f"{color}{text}{Colors.RESET}"
-
-
-def success(text: str) -> str:
-    return colored(f"✓ {text}", Colors.GREEN)
-
-
-def error(text: str) -> str:
-    return colored(f"✗ {text}", Colors.RED)
-
-
-def warning(text: str) -> str:
-    return colored(f"⚠ {text}", Colors.YELLOW)
-
-
-def info(text: str) -> str:
-    return colored(f"ℹ {text}", Colors.CYAN)
-
-
-def latency_color(ms: float) -> str:
-    """Get color for latency value."""
-    if ms < 50:
-        return Colors.GREEN
-    elif ms < 200:
-        return Colors.YELLOW
-    else:
-        return Colors.RED
+# Import shared utilities from project_shell (avoid duplication)
+from core.project_shell import (
+    Colors, colored, success, error, warning, info, latency_color, format_latency
+)
 
 
 # ============================================================
@@ -274,30 +215,16 @@ class OrchestraShell:
     
     async def _connect_ev3(self, host: str, user: str = "robot", 
                            password: str = "maker") -> None:
-        """Connect to EV3 and start generic daemon."""
-        from platforms.ev3.ev3_interface import EV3Interface, EV3DaemonSession
-        from concurrent.futures import ThreadPoolExecutor
+        """Connect to EV3 using MicroPython interface (USB/WiFi TCP)."""
+        from platforms.ev3.ev3_micropython import EV3MicroPython, EV3Config
         
-        loop = asyncio.get_event_loop()
-        executor = ThreadPoolExecutor(max_workers=2)
+        # Configure for WiFi TCP (can also auto-detect USB)
+        config = EV3Config(wifi_host=host, wifi_port=9000)
+        interface = EV3MicroPython(config=config)
         
-        # Connect
-        interface = EV3Interface(host, user, password)
-        await loop.run_in_executor(executor, interface.connect)
-        
-        # Load and start universal daemon
-        daemon_path = os.path.join(ROOT_DIR, "platforms/ev3/universal_daemon.py")
-        if os.path.exists(daemon_path):
-            with open(daemon_path) as f:
-                script_content = f.read()
-        else:
-            # Fallback to orchestra daemon
-            daemon_path = os.path.join(ROOT_DIR, "projects/orchestra/ev3_orchestra_daemon.py")
-            with open(daemon_path) as f:
-                script_content = f.read()
-        
-        session = EV3DaemonSession(interface, "universal_daemon.py", password)
-        await loop.run_in_executor(executor, lambda: session.start(script_content))
+        connected = await interface.connect()
+        if not connected:
+            raise ConnectionError(f"Failed to connect to EV3 at {host}")
         
         # Register device
         self.devices["ev3"] = DeviceInfo(
@@ -305,10 +232,10 @@ class OrchestraShell:
             platform=Platform.EV3,
             connected=True,
             interface=interface,
-            session=session,
+            session=None,  # MicroPython doesn't need separate session
         )
         
-        print(success(f"EV3 ({host}) - Daemon ready"))
+        print(success(f"EV3 ({host}) - MicroPython connected ({interface.transport_name})"))
     
     async def _connect_spike(self, address: str, name: str) -> None:
         """Connect to Spike Prime."""
@@ -335,10 +262,9 @@ class OrchestraShell:
             if device.connected:
                 try:
                     if device.platform == Platform.EV3:
-                        if device.session:
-                            device.session.stop()
+                        # MicroPython interface is async
                         if device.interface:
-                            device.interface.disconnect()
+                            await device.interface.disconnect()
                     elif device.platform == Platform.SPIKE:
                         if device.interface:
                             await device.interface.disconnect()
@@ -484,16 +410,12 @@ class OrchestraShell:
         return list(results)
     
     async def _execute_ev3(self, device: DeviceInfo, cmd: Command, args: Dict) -> str:
-        """Execute command on EV3."""
-        from concurrent.futures import ThreadPoolExecutor
-        
+        """Execute command on EV3 via MicroPython interface."""
         # Build daemon command
         daemon_cmd = get_ev3_command(cmd.name, args)
         
-        # Send to daemon
-        loop = asyncio.get_event_loop()
-        executor = ThreadPoolExecutor(max_workers=1)
-        response = await loop.run_in_executor(executor, device.session.send, daemon_cmd)
+        # Send via MicroPython interface (async)
+        response, latency = await device.interface.send(daemon_cmd)
         
         return response
     

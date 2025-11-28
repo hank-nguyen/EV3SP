@@ -1,9 +1,17 @@
-# Remote SSH connection to EV3
+# EV3 Puppy Remote Connection Configuration
+# Default: MicroPython (USB Serial / WiFi TCP) - fastest!
+
 mode: remote
-host: ev3dev.local
+transport: micropython  # "micropython" (default, 1-15ms) or "ssh" (legacy, 30-50ms)
+
+# MicroPython settings
+host: 192.168.68.114
+wifi_port: 9000
+
+# Legacy SSH settings (only used if transport: ssh)
 user: robot
 password: maker
 sudo_password: maker
-port: 22
-work_dir: /home/robot/ev3
+ssh_port: 22
 
+work_dir: /home/robot/ev3

@@ -14,7 +14,8 @@ from dataclasses import dataclass
 
 # Load LEGO protocol modules
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-LEGO_PYTHON_DIR = os.path.join(SCRIPT_DIR, "lego_docs/examples/python")
+ROOT_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+LEGO_PYTHON_DIR = os.path.join(ROOT_DIR, "protocols/spike-prime-protocol/examples/python")
 
 import importlib.util
 
@@ -152,7 +153,7 @@ def generate_beep_program(frequency: int = 440, duration_ms: int = 500) -> bytes
     Generate micropython code to play a beep on hub's built-in speaker.
     
     Note: sound.beep() requires await in Spike App 3.
-    Reference: lego_docs/examples/python/app.py
+    Reference: protocols/spike-prime-protocol/examples/python/app.py
     """
     return f"""import runloop
 from hub import sound
@@ -247,7 +248,7 @@ class SpikeInterface:
             self._info_response = await self._send_request(InfoRequest(), InfoResponse)
             
             self._connected = True
-            print(f"✓ Connected to {self.name}")
+            print(f"\033[36m✓ Connected to {self.name}\033[0m")
             return True
             
         except Exception as e:

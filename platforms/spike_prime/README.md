@@ -55,12 +55,12 @@ platforms/spike_prime/
 ├── scan_lego.py         # BLE scanner for hubs
 ├── test_sound.py        # API tests
 ├── configs/             # Connection settings
-└── lego_docs/           # Official LEGO protocol reference
+└── (see protocols/spike-prime-protocol/)  # Official LEGO protocol reference
 ```
 
 ## Spike App 3 API Reference
 
-**Always reference `lego_docs/` before coding!**
+**Always reference `protocols/spike-prime-protocol/` before coding!**
 
 ### Sound (requires `await`)
 
@@ -197,7 +197,7 @@ slot: 19
 
 ## BLE Protocol
 
-Reference: `lego_docs/docs/source/`
+Reference: `protocols/spike-prime-protocol/docs/source/`
 
 | UUID | Description |
 |------|-------------|
