@@ -6,22 +6,24 @@
 
 actions:
   sitdown:
-    description: "Sit down"
+    description: "Sit down (fold legs to resting position)"
     steps:
       - [eyes happy, 0]
-      - [motor D 120 1500, 0]
-      - [motor A 120 1500, 500]
-      - [stop, 0]
+      - [target2 D A 0 150, 1500]
 
   standup:
-    description: "Stand up"
+    description: "Stand up (push legs to lift body)"
     steps:
       - [eyes neutral, 0]
-      - [motor D -90 500, 0]
-      - [motor A -90 500, 200]
-      - [motor D -70 450, 0]
-      - [motor A -70 450, 200]
-      - [stop, 0]
+      - [target2 D A -55 100, 1800]
+
+  calibrate:
+    description: "Calibrate - set current position as standing (0 degrees)"
+    steps:
+      - [reset, 0]
+      - [eyes neutral, 0]
+      - [beep 440 100, 100]
+      - [beep 880 100, 0]
 
   bark:
     description: "Bark (woof woof)"
@@ -47,12 +49,10 @@ actions:
     description: "Jump"
     steps:
       - [eyes surprised, 0]
-      - [motor D 150, 0]
-      - [motor A 150, 300]
-      - [stop, 200]
-      - [motor D -80, 0]
-      - [motor A -80, 300]
-      - [stop, 0]
+      - [motor D 350 300, 0]
+      - [motor A 350 300, 350]
+      - [motor D -180 350, 0]
+      - [motor A -180 350, 400]
 
   head_up:
     description: "Raise head"
@@ -94,9 +94,7 @@ actions:
     description: "Go to sleep"
     steps:
       - [eyes sleepy, 0]
-      - [motor D -60, 0]
-      - [motor A -60, 1500]
-      - [stop, 0]
+      - [target2 D A 0 100, 1500]
       - [display Zzz..., 0]
 
   wakeup:
@@ -104,8 +102,7 @@ actions:
     steps:
       - [eyes surprised, 0]
       - [beep 880 200, 0]
-      - [motor D 120 500, 0]
-      - [motor A 120 500, 300]
+      - [target2 D A -90 150, 1500]
       - [eyes neutral, 0]
 
   playful:
@@ -119,4 +116,5 @@ actions:
       - [motor D 100 300, 0]
       - [motor A 100 300, 150]
       - [sound dog_bark, 0]
+
 

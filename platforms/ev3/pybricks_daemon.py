@@ -250,6 +250,122 @@ def cmd_stop(args):
     return "OK"
 
 
+def cmd_target(args):
+    """target <port> <angle> [speed] - Move motor to target angle (degrees)."""
+    if len(args) < 2:
+        return "ERR: target requires port and angle"
+    
+    port = args[0].upper()
+    if port not in motors:
+        return "ERR: motor {} not connected".format(port)
+    
+    try:
+        motor = motors[port]
+        target_angle = int(args[1])
+        speed = int(args[2]) if len(args) > 2 else 150
+        
+        # Calculate relative movement needed
+        current = motor.angle()
+        delta = target_angle - current
+        
+        if abs(delta) > 2:
+            # Calculate time needed based on speed (deg/s)
+            time_ms = abs(delta) * 1000 // speed + 100
+            
+            # Use run_time - must wait or motor gets interrupted
+            direction = 1 if delta > 0 else -1
+            motor.run_time(speed * direction, time_ms, wait=True)
+        
+        return "OK {}->{}".format(current, target_angle)
+    except Exception as e:
+        return "ERR: {}".format(e)
+
+
+def cmd_target2(args):
+    """target2 <port1> <port2> <angle> [speed] - Move 2 motors simultaneously."""
+    if len(args) < 3:
+        return "ERR: target2 requires port1, port2, angle"
+    
+    port1 = args[0].upper()
+    port2 = args[1].upper()
+    
+    if port1 not in motors:
+        return "ERR: motor {} not connected".format(port1)
+    if port2 not in motors:
+        return "ERR: motor {} not connected".format(port2)
+    
+    try:
+        motor1 = motors[port1]
+        motor2 = motors[port2]
+        target_angle = int(args[2])
+        speed = int(args[3]) if len(args) > 3 else 150
+        
+        # Calculate movements
+        current1 = motor1.angle()
+        current2 = motor2.angle()
+        delta1 = target_angle - current1
+        delta2 = target_angle - current2
+        
+        # Start both motors (non-blocking)
+        if abs(delta1) > 2:
+            time_ms1 = abs(delta1) * 1000 // speed + 100
+            dir1 = 1 if delta1 > 0 else -1
+            motor1.run_time(speed * dir1, time_ms1, wait=False)
+        
+        if abs(delta2) > 2:
+            time_ms2 = abs(delta2) * 1000 // speed + 100
+            dir2 = 1 if delta2 > 0 else -1
+            motor2.run_time(speed * dir2, time_ms2, wait=False)
+        
+        # Wait for the longer movement
+        max_time = max(
+            abs(delta1) * 1000 // speed if abs(delta1) > 2 else 0,
+            abs(delta2) * 1000 // speed if abs(delta2) > 2 else 0
+        ) + 200
+        wait(max_time)
+        
+        return "OK {}:{} {}:{}".format(port1, motor1.angle(), port2, motor2.angle())
+    except Exception as e:
+        return "ERR: {}".format(e)
+
+
+def cmd_reset(args):
+    """reset <port> - Reset motor angle to 0 (current position becomes 0)."""
+    if not args:
+        # Reset all motors
+        for motor in motors.values():
+            motor.reset_angle(0)
+        return "OK"
+    
+    port = args[0].upper()
+    if port not in motors:
+        return "ERR: motor {} not connected".format(port)
+    
+    motors[port].reset_angle(0)
+    return "OK"
+
+
+def cmd_pos(args):
+    """pos [port] - Get motor angle(s) in degrees."""
+    try:
+        if not args:
+            # Get all motor positions
+            positions = []
+            for port in sorted(motors.keys()):
+                angle = motors[port].angle()
+                positions.append("{}:{}".format(port, angle))
+            return "OK " + " ".join(positions)
+        
+        port = args[0].upper()
+        if port not in motors:
+            return "ERR: motor {} not connected".format(port)
+        
+        angle = motors[port].angle()
+        return "OK {}".format(angle)
+    except Exception as e:
+        return "ERR: {}".format(e)
+
+
 def cmd_sensor(args):
     """sensor <port> - Read sensor value."""
     if not args:
@@ -318,7 +434,8 @@ def cmd_status(args):
 
 def cmd_help(args):
     """help - Show available commands."""
-    return "OK beep,speak,motor,stop,sensor,eyes,display,status,quit"
+    cmds = "beep,speak,sound,motor,stop,target,reset,pos,sensor,eyes,display,status,help,quit"
+    return "OK " + cmds
 
 
 # Command dispatch table
@@ -328,6 +445,10 @@ COMMANDS = {
     "sound": cmd_sound,
     "motor": cmd_motor,
     "stop": cmd_stop,
+    "target": cmd_target,
+    "target2": cmd_target2,
+    "reset": cmd_reset,
+    "pos": cmd_pos,
     "sensor": cmd_sensor,
     "eyes": cmd_eyes,
     "display": cmd_display,
@@ -430,13 +551,8 @@ def draw_eyes(expression):
 # Main Loop
 # =============================================================================
 
-def process_command(line):
-    """Process a command line and return response."""
-    line = line.strip()
-    if not line:
-        return None
-    
-    parts = line.split()
+def process_single_command(parts):
+    """Process a single command (already split into parts)."""
     cmd = parts[0].lower()
     args = parts[1:] if len(parts) > 1 else []
     
@@ -450,6 +566,31 @@ def process_command(line):
             return "ERR: {}".format(e)
     else:
         return "ERR: unknown command: {}".format(cmd)
+
+
+def process_command(line):
+    """Process a command line and return response. Supports batch mode."""
+    line = line.strip()
+    if not line:
+        return None
+    
+    # Batch mode: "|cmd1 arg|cmd2 arg|cmd3" - pipe prefix = batch, minimal latency
+    if line[0] == "|":
+        batch_cmds = line[1:].split("|")
+        errors = []
+        for batch_cmd in batch_cmds:
+            batch_cmd = batch_cmd.strip()
+            if batch_cmd:
+                parts = batch_cmd.split()
+                result = process_single_command(parts)
+                if result and result.startswith("ERR"):
+                    errors.append(result)
+                if result == "QUIT":
+                    return "QUIT"
+        return "OK batch:{}".format(len(batch_cmds)) if not errors else ";".join(errors)
+    
+    parts = line.split()
+    return process_single_command(parts)
 
 
 def run_stdin_mode():

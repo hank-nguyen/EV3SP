@@ -949,11 +949,30 @@ Commands: standup, sitdown, bark, stretch, hop
         sequence = adapter.translate(action)
         responses = []
         
+        # Group consecutive commands until we hit a delay
+        # Commands before delay run together (batched), then we wait
+        batch = []
+        
         for cmd, delay_ms in sequence:
-            response = self._send_command(cmd)
-            responses.append(response)
+            batch.append(cmd)
+            
             if delay_ms > 0:
+                # Execute batch then wait
+                if len(batch) == 1:
+                    response = self._send_command(batch[0])
+                else:
+                    response = self._send_command("|" + "|".join(batch))
+                responses.append(response)
+                batch = []
                 time.sleep(delay_ms / 1000.0)
+        
+        # Execute remaining batch (no trailing delay)
+        if batch:
+            if len(batch) == 1:
+                response = self._send_command(batch[0])
+            else:
+                response = self._send_command("|" + "|".join(batch))
+            responses.append(response)
         
         # Return combined result
         if all("OK" in r or r.startswith("OK") for r in responses):
@@ -1025,8 +1044,10 @@ Commands: standup, sitdown, bark, stretch, hop
         
         # Define commands
         commands = {
-            "standup": ("Stand up", make_handler("standup")),
-            "sitdown": ("Sit down", make_handler("sitdown")),
+            "standup": ("Stand up (to angle 0)", make_handler("standup")),
+            "sitdown": ("Sit down (to angle 90)", make_handler("sitdown")),
+            "calibrate": ("Set current position as standing (0°)", make_handler("calibrate")),
+            "pos": ("Show motor positions", make_handler("pos")),
             "bark": ("Bark (woof woof)", make_handler("bark")),
             "stretch": ("Stretch", make_handler("stretch")),
             "hop": ("Hop", make_handler("hop")),
@@ -1038,6 +1059,7 @@ Commands: standup, sitdown, bark, stretch, hop
             "eyes": ("Change eye display", make_handler("eyes"), "<style>"),
             "info": ("Show motors/sensors/battery", make_handler("status")),
             "reload": ("Reload actions.yaml (no restart needed)", lambda args: reload_actions()),
+            "raw": ("Send raw command to daemon", lambda args: self._send_command(args) if args else "ERR: usage: raw <command>", "<cmd>"),
         }
         
         # Eye styles as aliases
