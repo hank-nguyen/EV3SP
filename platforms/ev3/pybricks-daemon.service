@@ -1,0 +1,15 @@
+[Unit]
+Description=Pybricks Daemon for EV3
+After=network.target
+
+[Service]
+Type=simple
+User=robot
+WorkingDirectory=/home/robot
+ExecStart=/usr/bin/brickrun /home/robot/pybricks_daemon.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
