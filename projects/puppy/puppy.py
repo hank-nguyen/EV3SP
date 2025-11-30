@@ -1048,9 +1048,9 @@ Commands: standup, sitdown, bark, stretch, hop
         
         # Define commands
         commands = {
-            "standup": ("Stand up (to angle 0)", make_handler("standup")),
-            "sitdown": ("Sit down (to angle 90)", make_handler("sitdown")),
-            "calibrate": ("Set current position as standing (0°)", make_handler("calibrate")),
+            "standup": ("Stand up (legs to -55°)", make_handler("standup")),
+            "sitdown": ("Sit down (legs to 0°)", make_handler("sitdown")),
+            "calibrate": ("Set current as SITTING position (0°)", make_handler("calibrate")),
             "pos": ("Show motor positions", make_handler("pos")),
             "bark": ("Bark (woof woof)", make_handler("bark")),
             "stretch": ("Stretch", make_handler("stretch")),
@@ -1081,6 +1081,15 @@ Commands: standup, sitdown, bark, stretch, hop
         def connect():
             self._connect()
             self._start_daemon()
+            # Force calibration at startup
+            print("\n⚠️  CALIBRATION REQUIRED")
+            print("   1. Put puppy in SITTING position (legs folded)")
+            print("   2. Press ENTER to calibrate (sets current as 0°)")
+            input("   Press ENTER when ready... ")
+            self._send_command("reset")
+            pos_response = self._send_command("pos")
+            print(f"   ✓ Calibrated! {pos_response}")
+            print("   Convention: 0° = sitting, -55° = standing\n")
             return True
         
         # Disconnect function  
