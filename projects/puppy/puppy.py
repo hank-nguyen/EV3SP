@@ -974,9 +974,13 @@ Commands: standup, sitdown, bark, stretch, hop
                 response = self._send_command("|" + "|".join(batch))
             responses.append(response)
         
-        # Return combined result
-        if all("OK" in r or r.startswith("OK") for r in responses):
-            return "OK"
+        # Return combined result - check for FAIL (position verification failed)
+        fails = [r for r in responses if r.startswith("FAIL")]
+        if fails:
+            return fails[0]  # Return first failure with details
+        elif all("OK" in r or r.startswith("OK") for r in responses):
+            # Return last response with details (e.g., "OK moved D:0->-55...")
+            return responses[-1] if responses else "OK"
         else:
             return "; ".join(responses)
 

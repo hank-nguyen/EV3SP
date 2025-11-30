@@ -282,7 +282,7 @@ def cmd_target(args):
 
 
 def cmd_target2(args):
-    """target2 <port1> <port2> <angle> [speed] - Move 2 motors simultaneously."""
+    """target2 <port1> <port2> <angle> [speed] - Move 2 motors simultaneously with verification."""
     if len(args) < 3:
         return "ERR: target2 requires port1, port2, angle"
     
@@ -299,6 +299,7 @@ def cmd_target2(args):
         motor2 = motors[port2]
         target_angle = int(args[2])
         speed = int(args[3]) if len(args) > 3 else 150
+        tolerance = 15  # Degrees tolerance for success
         
         # Calculate movements
         current1 = motor1.angle()
@@ -306,25 +307,46 @@ def cmd_target2(args):
         delta1 = target_angle - current1
         delta2 = target_angle - current2
         
+        # Check if already at target
+        if abs(delta1) <= 2 and abs(delta2) <= 2:
+            return "OK already@{} {}:{} {}:{}".format(target_angle, port1, current1, port2, current2)
+        
         # Start both motors (non-blocking)
+        moved = False
         if abs(delta1) > 2:
             time_ms1 = abs(delta1) * 1000 // speed + 100
             dir1 = 1 if delta1 > 0 else -1
             motor1.run_time(speed * dir1, time_ms1, wait=False)
+            moved = True
         
         if abs(delta2) > 2:
             time_ms2 = abs(delta2) * 1000 // speed + 100
             dir2 = 1 if delta2 > 0 else -1
             motor2.run_time(speed * dir2, time_ms2, wait=False)
+            moved = True
+        
+        if not moved:
+            return "OK already@{} {}:{} {}:{}".format(target_angle, port1, current1, port2, current2)
         
         # Wait for the longer movement
         max_time = max(
             abs(delta1) * 1000 // speed if abs(delta1) > 2 else 0,
             abs(delta2) * 1000 // speed if abs(delta2) > 2 else 0
-        ) + 200
+        ) + 300
         wait(max_time)
         
-        return "OK {}:{} {}:{}".format(port1, motor1.angle(), port2, motor2.angle())
+        # Verify final positions
+        final1 = motor1.angle()
+        final2 = motor2.angle()
+        error1 = abs(final1 - target_angle)
+        error2 = abs(final2 - target_angle)
+        
+        if error1 > tolerance or error2 > tolerance:
+            return "FAIL {}:{}->{}(err:{}) {}:{}->{}(err:{}) target:{}".format(
+                port1, current1, final1, error1, port2, current2, final2, error2, target_angle)
+        
+        return "OK moved {}:{}->{} {}:{}->{} target:{}".format(
+            port1, current1, final1, port2, current2, final2, target_angle)
     except Exception as e:
         return "ERR: {}".format(e)
 
@@ -578,16 +600,25 @@ def process_command(line):
     if line[0] == "|":
         batch_cmds = line[1:].split("|")
         errors = []
+        last_result = None
         for batch_cmd in batch_cmds:
             batch_cmd = batch_cmd.strip()
             if batch_cmd:
                 parts = batch_cmd.split()
                 result = process_single_command(parts)
-                if result and result.startswith("ERR"):
-                    errors.append(result)
-                if result == "QUIT":
-                    return "QUIT"
-        return "OK batch:{}".format(len(batch_cmds)) if not errors else ";".join(errors)
+                if result:
+                    last_result = result
+                    if result.startswith("ERR") or result.startswith("FAIL"):
+                        errors.append(result)
+                    if result == "QUIT":
+                        return "QUIT"
+        # Return errors, or last meaningful result (with position info)
+        if errors:
+            return ";".join(errors)
+        elif last_result and ("moved" in last_result or "already@" in last_result or "FAIL" in last_result):
+            return last_result  # Return target2 result with position info
+        else:
+            return "OK batch:{}".format(len(batch_cmds))
     
     parts = line.split()
     return process_single_command(parts)
