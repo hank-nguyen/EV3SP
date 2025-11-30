@@ -434,7 +434,7 @@ def cmd_status(args):
 
 def cmd_help(args):
     """help - Show available commands."""
-    cmds = "beep,speak,sound,motor,stop,target,reset,pos,sensor,eyes,display,status,help,quit"
+    cmds = "beep,speak,sound,motor,stop,target,target2,reset,pos,sensor,eyes,display,status,help,quit"
     return "OK " + cmds
 
 
