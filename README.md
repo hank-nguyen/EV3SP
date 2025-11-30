@@ -218,6 +218,7 @@ EV3SP/
 - Ultra-low latency: **1-15ms** ⚡
 - Position-aware motor control with verification
 - Display (eye expressions), sound, sensors
+- Auto-start daemon on boot (optional systemd service)
 
 ### [Spike Prime](platforms/spike_prime/README.md)
 - BLE connection (App 3 firmware)

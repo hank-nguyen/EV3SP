@@ -19,22 +19,43 @@ LEGO Mindstorms EV3 implementation supporting both **ev3dev** (Linux) and **Pybr
 ### 2. Deploy Daemon
 ```bash
 # Copy daemon to EV3 via USB or network
-scp platforms/ev3/pybricks_daemon.py robot@ev3dev.local:~/
+scp platforms/ev3/pybricks_daemon.py robot@192.168.68.114:~/
 
-# On EV3, run:
+# On EV3, run manually:
 brickrun pybricks_daemon.py
 ```
 
-### 3. Connect from Host
+### 3. Auto-Start Daemon (Optional)
+
+To start the daemon automatically on EV3 boot:
+
+```bash
+# Copy service file to EV3
+scp platforms/ev3/pybricks-daemon.service robot@192.168.68.114:~/
+
+# SSH to EV3 and install service
+ssh robot@192.168.68.114
+sudo cp ~/pybricks-daemon.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable pybricks-daemon
+sudo systemctl start pybricks-daemon
+
+# Check status
+sudo systemctl status pybricks-daemon
+```
+
+After this, the daemon starts automatically on boot - no manual start needed!
+
+### 4. Connect from Host
 ```bash
 # Auto-detect (tries USB first, then WiFi)
-python platforms/ev3/ev3_micropython.py flow
+python projects/puppy/puppy.py action=flow
 
-# Force USB Serial
-python platforms/ev3/ev3_micropython.py --transport usb flow
+# Specify WiFi host
+python projects/puppy/puppy.py action=flow connection.host=192.168.68.114
 
-# Force WiFi TCP
-python platforms/ev3/ev3_micropython.py --transport wifi --host 192.168.1.100 flow
+# Or use ev3_micropython directly
+python platforms/ev3/ev3_micropython.py flow --host 192.168.68.114
 ```
 
 ## Architecture
@@ -110,16 +131,20 @@ actions:
   sitdown:
     description: "Sit down"
     steps:
-      - [eyes sleepy, 0]       # [command, delay_ms]
-      - [motor D -25, 0]
-      - [motor A -25, 800]     # Wait 800ms after this
-      - [stop, 0]
+      - [eyes happy, 0]              # [command, delay_ms]
+      - [target2 D A 0 150, 1500]    # Move both legs to 0°, wait 1500ms
   
+  standup:
+    description: "Stand up"
+    steps:
+      - [eyes neutral, 0]
+      - [target2 D A -55 100, 1800]  # Move both legs to -55°
+
   bark:
-    description: "Bark (woof woof)"
+    description: "Bark"
     steps:
       - [eyes surprised, 0]
-      - [speak woof woof, 0]
+      - [sound dog_bark, 0]
 ```
 
 ## Generic Daemon Design
@@ -128,10 +153,12 @@ actions:
 
 ```
 Generic Commands (daemon knows):     Project Actions (adapter translates):
-├── motor <port> <speed> [ms]        ├── sitdown → [motor D -25, motor A -25, stop]
-├── stop [port]                      ├── standup → [motor D 80 500, motor A 80 500, ...]
-├── beep [freq] [dur]                ├── bark → [eyes surprised, speak woof woof]
-├── speak <text>                     └── ... defined in YAML, not code!
+├── motor <port> <speed> [ms]        ├── sitdown → [eyes happy, target2 D A 0 150]
+├── target <port> <angle> [speed]    ├── standup → [eyes neutral, target2 D A -55 100]
+├── target2 <p1> <p2> <angle>        ├── bark → [eyes surprised, sound dog_bark]
+├── stop [port]                      └── ... defined in YAML, not code!
+├── pos / reset
+├── beep / sound / speak
 ├── eyes <expression>
 ├── display <text>
 ├── sensor <port>
@@ -182,11 +209,16 @@ async with EV3MicroPython(config=config, transport="wifi") as ev3:
 |---------|-------------|
 | `beep [freq] [dur]` | Play beep (default: 880Hz, 200ms) |
 | `speak <text>` | Text-to-speech |
+| `sound <name>` | Play sound file (e.g., `dog_bark`) |
 | `motor <port> <speed>` | Run motor (-100 to 100) |
 | `motor <port> <speed> <ms>` | Run motor for time |
+| `target <port> <angle> [speed]` | Move motor to angle |
+| `target2 <p1> <p2> <angle> [speed]` | Move 2 motors simultaneously |
 | `stop [port]` | Stop motor (or all) |
+| `pos [port]` | Get motor angle(s) |
+| `reset [port]` | Reset motor angle to 0 |
 | `sensor <port>` | Read sensor value |
-| `eyes <expr>` | Show expression (happy, sad, angry, neutral) |
+| `eyes <expr>` | Show expression (happy, angry, sleepy, surprised, love, wink) |
 | `display <text>` | Show text on display |
 | `status` | Get battery/motor/sensor status |
 | `quit` | Exit daemon |

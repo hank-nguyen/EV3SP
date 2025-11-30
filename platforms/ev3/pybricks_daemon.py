@@ -224,9 +224,9 @@ def cmd_motor(args):
     speed = int(args[1])
     
     if len(args) > 2:
-        # Run for specific time
+        # Run for specific time, then coast (don't hold)
         time_ms = int(args[2])
-        motor.run_time(speed, time_ms, wait=False)
+        motor.run_time(speed, time_ms, then=Stop.COAST, wait=False)
     else:
         # Run continuously
         motor.run(speed)
@@ -272,9 +272,9 @@ def cmd_target(args):
             # Calculate time needed based on speed (deg/s)
             time_ms = abs(delta) * 1000 // speed + 100
             
-            # Use run_time - must wait or motor gets interrupted
+            # Use run_time with Stop.COAST to release motor after movement
             direction = 1 if delta > 0 else -1
-            motor.run_time(speed * direction, time_ms, wait=True)
+            motor.run_time(speed * direction, time_ms, then=Stop.COAST, wait=True)
         
         return "OK {}->{}".format(current, target_angle)
     except Exception as e:
@@ -316,13 +316,14 @@ def cmd_target2(args):
         if abs(delta1) > 2:
             time_ms1 = abs(delta1) * 1000 // speed + 100
             dir1 = 1 if delta1 > 0 else -1
-            motor1.run_time(speed * dir1, time_ms1, wait=False)
+            # Use Stop.COAST to release motor after movement (prevents stall/overload)
+            motor1.run_time(speed * dir1, time_ms1, then=Stop.COAST, wait=False)
             moved = True
         
         if abs(delta2) > 2:
             time_ms2 = abs(delta2) * 1000 // speed + 100
             dir2 = 1 if delta2 > 0 else -1
-            motor2.run_time(speed * dir2, time_ms2, wait=False)
+            motor2.run_time(speed * dir2, time_ms2, then=Stop.COAST, wait=False)
             moved = True
         
         if not moved:
