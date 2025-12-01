@@ -235,11 +235,12 @@ def cmd_motor(args):
 
 
 def cmd_stop(args):
-    """stop <port> - Stop motor."""
+    """stop [port] - Stop motor (with coast to release)."""
     if not args:
-        # Stop all motors
+        # Stop all motors with coast (releases holding torque)
         for motor in motors.values():
             motor.stop()
+            motor.dc(0)  # Ensure no residual power
         return "OK"
     
     port = args[0].upper()
@@ -247,7 +248,25 @@ def cmd_stop(args):
         return "ERR: motor {} not connected".format(port)
     
     motors[port].stop()
+    motors[port].dc(0)
     return "OK"
+
+
+def cmd_brake(args):
+    """brake [port] - Hard brake motor (use to clear stall state)."""
+    if not args:
+        for port, motor in motors.items():
+            motor.brake()
+            motor.dc(0)
+        return "OK all braked"
+    
+    port = args[0].upper()
+    if port not in motors:
+        return "ERR: motor {} not connected".format(port)
+    
+    motors[port].brake()
+    motors[port].dc(0)
+    return "OK {} braked".format(port)
 
 
 def cmd_target(args):
@@ -336,6 +355,10 @@ def cmd_target2(args):
         ) + 300
         wait(max_time)
         
+        # Stop motors to release and clear any residual state
+        motor1.stop()
+        motor2.stop()
+        
         # Verify final positions
         final1 = motor1.angle()
         final2 = motor2.angle()
@@ -343,6 +366,12 @@ def cmd_target2(args):
         error2 = abs(final2 - target_angle)
         
         if error1 > tolerance or error2 > tolerance:
+            # Try to recover: brake and release
+            motor1.brake()
+            motor2.brake()
+            wait(100)
+            motor1.dc(0)
+            motor2.dc(0)
             return "FAIL {}:{}->{}(err:{}) {}:{}->{}(err:{}) target:{}".format(
                 port1, current1, final1, error1, port2, current2, final2, error2, target_angle)
         
@@ -468,6 +497,7 @@ COMMANDS = {
     "sound": cmd_sound,
     "motor": cmd_motor,
     "stop": cmd_stop,
+    "brake": cmd_brake,
     "target": cmd_target,
     "target2": cmd_target2,
     "reset": cmd_reset,

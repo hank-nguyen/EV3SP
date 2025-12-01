@@ -101,15 +101,16 @@ python projects/puppy/puppy.py action=flow connection.host=192.168.68.114
 
 **Inside the flow shell:**
 ```
-[Puppy] ● > calibrate     # Set current position as 0°
-[Puppy] ● > standup       # Move legs to standing position
-[Puppy] ● > sitdown       # Move legs to sitting position
-[Puppy] ● > bark          # Woof!
-[Puppy] ● > hop           # Jump
+[Puppy] ● > calibrate     # Project-specific setup
+[Puppy] ● > standup       # Project-specific action
+[Puppy] ● > sitdown       # Project-specific action
 [Puppy] ● > pos           # Show motor positions
+[Puppy] ● > brake         # Clear motor stall state (if stuck)
 [Puppy] ● > help          # Show all commands
 [Puppy] ● > quit
 ```
+
+See project-specific READMEs for full command lists (e.g., `projects/puppy/README.md`).
 
 ### Spike Prime
 
@@ -161,7 +162,8 @@ transport: micropython
 | `motor <port> <speed> [ms]` | Run motor | `motor D 100 500` |
 | `target <port> <angle> [speed]` | Move to angle | `target D -55 150` |
 | `target2 <p1> <p2> <angle> [speed]` | Move 2 motors | `target2 D A -55 100` |
-| `stop [port]` | Stop motor(s) | `stop` |
+| `stop [port]` | Stop motor(s) with coast | `stop` |
+| `brake [port]` | Hard brake (clears stall) | `brake` |
 | `eyes <style>` | Set expression | `eyes happy` |
 | `pos [port]` | Get motor angle | `pos` |
 | `reset [port]` | Reset angle to 0 | `reset` |

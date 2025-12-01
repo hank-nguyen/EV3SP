@@ -174,6 +174,17 @@ Generic Commands (daemon knows):     Project Actions (adapter translates):
 
 **Adding project support**: Create `configs/actions.yaml` in your project folder.
 
+## Motor Behavior
+
+| Event | Action | Purpose |
+|-------|--------|---------|
+| After `target`/`target2` | `stop()` with `Stop.COAST` | Release motor, prevent overheating |
+| On movement FAIL | `brake()` + `dc(0)` | Clear stall state, full release |
+| Manual `stop` | Coast release | Gentle stop |
+| Manual `brake` | Hard brake + release | Clear stuck motor |
+
+**Position verification**: `target2` checks final position vs target (±15° tolerance). Returns `FAIL` with details if not reached.
+
 ## Latency Comparison
 
 | Transport | Latency | Notes |
@@ -214,7 +225,8 @@ async with EV3MicroPython(config=config, transport="wifi") as ev3:
 | `motor <port> <speed> <ms>` | Run motor for time |
 | `target <port> <angle> [speed]` | Move motor to angle |
 | `target2 <p1> <p2> <angle> [speed]` | Move 2 motors simultaneously |
-| `stop [port]` | Stop motor (or all) |
+| `stop [port]` | Stop motor with coast (releases torque) |
+| `brake [port]` | Hard brake (clears stall state) |
 | `pos [port]` | Get motor angle(s) |
 | `reset [port]` | Reset motor angle to 0 |
 | `sensor <port>` | Read sensor value |

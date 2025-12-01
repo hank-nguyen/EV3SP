@@ -937,6 +937,29 @@ Commands: standup, sitdown, bark, stretch, hop
             except (OSError, IOError) as e:
                 raise OSError("Socket is closed: " + str(e))
 
+    def _do_squat(self, args: str) -> str:
+        """Do squats (standup + sitdown) N times."""
+        try:
+            count = int(args) if args else 1
+        except ValueError:
+            return "ERR: usage: squat [count]"
+        
+        results = []
+        for i in range(count):
+            # Standup
+            result1 = self._execute_sequence("standup")
+            if result1.startswith("FAIL"):
+                return f"FAIL at squat {i+1} standup: {result1}"
+            
+            # Sitdown
+            result2 = self._execute_sequence("sitdown")
+            if result2.startswith("FAIL"):
+                return f"FAIL at squat {i+1} sitdown: {result2}"
+            
+            results.append(f"squat {i+1}: OK")
+        
+        return f"OK {count} squats done"
+
     def _execute_sequence(self, action: str) -> str:
         """Execute a puppy action sequence (MicroPython mode)."""
         # get_action_adapter() auto-reloads if YAML file changed
@@ -1055,11 +1078,13 @@ Commands: standup, sitdown, bark, stretch, hop
             "bark": ("Bark (woof woof)", make_handler("bark")),
             "stretch": ("Stretch", make_handler("stretch")),
             "hop": ("Hop", make_handler("hop")),
+            "squat": ("Squat (standup+sitdown) N times", self._do_squat, "[count]"),
             "head_up": ("Move head up", make_handler("head_up")),
             "head_down": ("Move head down", make_handler("head_down")),
             "happy": ("Happy expression", make_handler("happy")),
             "angry": ("Angry expression", make_handler("angry")),
             "stop": ("Stop all motors", make_handler("stop")),
+            "brake": ("Brake & clear stall state", make_handler("brake")),
             "eyes": ("Change eye display", make_handler("eyes"), "<style>"),
             "info": ("Show motors/sensors/battery", make_handler("status")),
             "reload": ("Reload actions.yaml (no restart needed)", lambda args: reload_actions()),

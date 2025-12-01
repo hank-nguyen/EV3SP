@@ -59,14 +59,35 @@ ssh robot@<EV3_IP> "nohup brickrun ~/pybricks_daemon.py &"
 python puppy.py action=flow
 ```
 
+## Typical Session
+
+```
+[Puppy] ● > calibrate     # First! Set sitting position as 0°
+[Puppy] ● > standup       # Stand up (-55°)
+[Puppy] ● > sitdown       # Sit back down (0°)
+[Puppy] ● > squat 5       # 5 squats
+[Puppy] ● > bark          # Woof!
+[Puppy] ● > happy         # Happy dance
+[Puppy] ● > quit
+```
+
+**Important**: Always run `calibrate` first with puppy in sitting position!
+
 ## Flow Mode Commands
+
+### Motor & Position
+| Command | Description |
+|---------|-------------|
+| `calibrate` | **REQUIRED first** - set current position as 0° |
+| `pos` | Show motor positions (for debugging) |
 
 ### Actions
 | Command | Description |
 |---------|-------------|
-| `standup` | Stand up |
-| `sitdown` | Sit down |
-| `bark` | Say "woof woof" |
+| `standup` | Stand up (legs to -55°) |
+| `sitdown` | Sit down (legs to 0°) |
+| `squat [n]` | Do n squats (default: 3) |
+| `bark` | Woof! (plays sound file) |
 | `stretch` | Stretch legs |
 | `hop` | Jump |
 | `head_up` | Raise head |
